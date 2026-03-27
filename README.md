@@ -1,2 +1,2 @@
-# FRCoin
+# FRCoiN
 Frontier Consolidated "DKP" Bot
