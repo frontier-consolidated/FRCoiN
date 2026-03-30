@@ -1,0 +1,17 @@
+.git
+*.md
+*.docx
+
+pulumi/
+backups/
+.github/
+**/node_modules
+**/.gitignore
+**/dist
+**/build
+
+**/__pycache__
+**/.venv
+*.egg-info/
+
+.env*

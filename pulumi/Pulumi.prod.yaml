@@ -1,0 +1,7 @@
+environment:
+    - frcoin-bot/prod
+    - frcn/pulumi-aws-access
+
+config:
+    kubernetes:context: frcn
+    frcoin-bot:repositoryName: frcoin/prod
