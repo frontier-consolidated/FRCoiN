@@ -3,7 +3,7 @@ name = "frcoin"
 version = "0.0.0"
 requires-python = ">=3.11"
 dependencies = [
-    "aiosqlite~=0.22.1",
+    "asyncpg~=0.31.0",
     "discord.py~=2.7.1",
     "python-dotenv~=1.2.2",
     "openpyxl~=3.1.5"
