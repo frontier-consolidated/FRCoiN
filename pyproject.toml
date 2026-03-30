@@ -8,3 +8,23 @@ dependencies = [
     "python-dotenv~=1.2.2",
     "openpyxl~=3.1.5"
 ]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# Explicitly list packages and top-level modules to avoid automatic discovery
+# in a flat-layout which rejects multiple top-level packages being discovered.
+packages = ["views", "modals"]
+# Top-level single-file modules to install (names without .py extension)
+py-modules = [
+    "audit_logs",
+    "db",
+    "events",
+    "export",
+    "helpers",
+    "leaderboard",
+    "logger",
+    "main"
+]
