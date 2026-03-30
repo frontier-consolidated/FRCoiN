@@ -7,13 +7,14 @@ import asyncpg
 import os
 from logger import logger
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-
 # Global connection pool
 db_pool: Union[asyncpg.Pool, None] = None
 
 async def get_pool() -> asyncpg.Pool:
     global db_pool
+
+    DATABASE_URL = os.getenv("DATABASE_URL")
+
     if db_pool is None:
         db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
     return db_pool
@@ -71,7 +72,7 @@ async def init_db():
         await conn.execute("""
             ALTER TABLE events ADD COLUMN IF NOT EXISTS dkp_awarded INTEGER
         """)
-        
+
     logger.info("Database initialised.")
 
 async def add_dkp(user_id: int, amount: int, guild_id: Union[int, None] = None, reason: Union[str, None] = None, issued_by_id: Union[int, None] = None):

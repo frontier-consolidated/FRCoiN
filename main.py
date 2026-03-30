@@ -12,16 +12,11 @@
 #   Read Message History · Attach Files
 #   Use Application Commands · Connect (voice)
 #
-# New commands added:
-#   /events_saved           — browse all saved events (paginated)
-#   /event_export <id>      — export a specific event's attendance as xlsx
-#   /event_delete <id>      — permanently delete a saved event
-#   /snapshot_event org_only:True/False — filter by org roles on capture
-#   /setup org_roles        — new optional param to configure org roles
 # ─────────────────────────────────────────────
 
 import os
 import io
+import time
 from typing import cast
 from dotenv import load_dotenv
 import openpyxl
@@ -32,7 +27,7 @@ from discord import app_commands
 
 from audit_logs import audit_embed, send_audit
 from db import import_users, init_db, set_config, set_dkp
-from events import active_events, add_event_attendee, create_event, delete_event, get_completed_events, get_event_attendees, get_event_in_guild, remove_event_attendee, take_event_attendance
+from events import active_events, add_event_attendee, create_event, delete_event, get_completed_events, get_event, get_event_attendees, get_event_in_guild, load_active_events, remove_event_attendee, take_event_attendance
 from export import build_dkp_xlsx, build_event_xlsx
 from helpers import get_org_role_ids, is_admin, member_has_org_role, parse_role_ids
 from leaderboard import update_leaderboard
@@ -162,12 +157,18 @@ async def snapshot_event(interaction: discord.Interaction, org_only: bool = Fals
         return await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
 
     guild_id = interaction.guild_id
-    active_event = active_events.get(guild_id)
-    if not active_event:
+    active_event_id = active_events.get(guild_id)
+    if not active_event_id:
         return await interaction.response.send_message("No active event. Use `/start_event` first.", ephemeral=True)
 
     if not interaction.user.voice or not interaction.user.voice.channel:
         return await interaction.response.send_message("You must be in a voice channel to snapshot.", ephemeral=True)
+
+    active_event = await get_event(active_event_id)
+    if not active_event:
+        return await interaction.response.send_message(
+            f"No event with ID `{active_event_id}` found", ephemeral=True
+        )
 
     all_members = [m for m in interaction.user.voice.channel.members if not m.bot]
 
@@ -184,15 +185,16 @@ async def snapshot_event(interaction: discord.Interaction, org_only: bool = Fals
         members = all_members
         skipped = 0
 
-    await take_event_attendance(active_event, members)
+    await take_event_attendance(active_event_id, members)
 
     filter_note = f" *(org-only filter applied, {skipped} non-org member(s) skipped)*" if org_only else ""
     await interaction.response.send_message(
-        f"✅ Captured **{len(members)} users** into event `{active_event}`.{filter_note}", ephemeral=True
+        f"✅ Captured **{len(members)} users** into event `{active_event["name"]}` (ID: {active_event_id}).{filter_note}", ephemeral=True
     )
 
     embed = audit_embed("📸 Event Snapshot Taken", discord.Colour.teal())
-    embed.add_field(name="Event ID", value=str(active_event), inline=True)
+    embed.add_field(name="Event", value=active_event["name"], inline=True)
+    embed.add_field(name="Event ID", value=str(active_event_id), inline=True)
     embed.add_field(name="Captured", value=f"{len(members)} users", inline=True)
     embed.add_field(name="Org-Only Filter", value="Yes" if org_only else "No", inline=True)
     if org_only:
@@ -234,6 +236,8 @@ async def cancel_event(interaction: discord.Interaction):
         return await interaction.response.send_message("No active event to cancel.", ephemeral=True)
 
     event_id = active_events.pop(guild_id)
+    await delete_event(event_id)
+
     await interaction.response.send_message("✅ Active event cancelled. No DKP was awarded.", ephemeral=True)
 
     embed = audit_embed("❌ Event Cancelled", discord.Colour.red())
@@ -252,26 +256,33 @@ async def event_add(interaction: discord.Interaction, member: discord.Member):
         return await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
 
     guild_id = interaction.guild_id
-    active_event = active_events.get(guild_id)
-    if not active_event:
+    active_event_id = active_events.get(guild_id)
+    if not active_event_id:
         return await interaction.response.send_message("No active event. Use `/start_event` first.", ephemeral=True)
+
+    active_event = await get_event(active_event_id)
+    if not active_event:
+        return await interaction.response.send_message(
+            f"No event with ID `{active_event_id}` found", ephemeral=True
+        )
 
     if member.bot:
         return await interaction.response.send_message("You can't add a bot to an event.", ephemeral=True)
 
-    result = await add_event_attendee(active_event, member)
+    result = await add_event_attendee(active_event_id, member)
 
     if result == "INSERT 0 0":
         return await interaction.response.send_message(
-            f"**{member.display_name}** is already in the attendance list for event `{active_event}`.", ephemeral=True
+            f"**{member.display_name}** is already in the attendance list for event `{active_event["name"]}` (ID: {active_event_id}).", ephemeral=True
         )
 
     await interaction.response.send_message(
-        f"✅ Added **{member.display_name}** to event `{active_event}`.", ephemeral=True
+        f"✅ Added **{member.display_name}** to event `{active_event["name"]}` (ID: {active_event_id}).", ephemeral=True
     )
 
     embed = audit_embed("➕ Attendee Added to Event", discord.Colour.green())
-    embed.add_field(name="Event ID", value=str(active_event), inline=True)
+    embed.add_field(name="Event", value=active_event["name"], inline=True)
+    embed.add_field(name="Event ID", value=str(active_event_id), inline=True)
     embed.add_field(name="Member", value=member.mention, inline=True)
     embed.add_field(name="Added By", value=interaction.user.mention, inline=False)
     await send_audit(interaction.guild, embed)
@@ -287,30 +298,37 @@ async def event_remove(interaction: discord.Interaction, member: discord.Member)
         return await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
 
     guild_id = interaction.guild_id
-    active_event = active_events.get(guild_id)
-    if not active_event:
+    active_event_id = active_events.get(guild_id)
+    if not active_event_id:
         return await interaction.response.send_message("No active event. Use `/start_event` first.", ephemeral=True)
 
-    result = await remove_event_attendee(active_event, member)
+    active_event = await get_event(active_event_id)
+    if not active_event:
+        return await interaction.response.send_message(
+            f"No event with ID `{active_event_id}` found", ephemeral=True
+        )
+
+    result = await remove_event_attendee(active_event_id, member)
 
     if result == "DELETE 0":
         return await interaction.response.send_message(
-            f"**{member.display_name}** wasn't in the attendance list for event `{active_event}`.", ephemeral=True
+            f"**{member.display_name}** wasn't in the attendance list for event `{active_event["name"]}`.", ephemeral=True
         )
 
     await interaction.response.send_message(
-        f"✅ Removed **{member.display_name}** from event `{active_event}`.", ephemeral=True
+        f"✅ Removed **{member.display_name}** from event `{active_event["name"]}` (ID: {active_event_id}).", ephemeral=True
     )
 
     embed = audit_embed("➖ Attendee Removed from Event", discord.Colour.orange())
+    embed.add_field(name="Event", value=active_event["name"], inline=True)
     embed.add_field(name="Event ID", value=str(active_event), inline=True)
     embed.add_field(name="Member", value=member.mention, inline=True)
     embed.add_field(name="Removed By", value=interaction.user.mention, inline=False)
     await send_audit(interaction.guild, embed)
 
 
-@bot.tree.command(name="event_list", description="Show everyone currently on the attendance list for the active event")
-async def event_list(interaction: discord.Interaction):
+@bot.tree.command(name="event_attendance", description="Show everyone currently on the attendance list for the active event")
+async def event_attendance(interaction: discord.Interaction):
     if not interaction.guild_id or not interaction.guild or not isinstance(interaction.user, discord.Member):
         return await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
     
@@ -318,15 +336,21 @@ async def event_list(interaction: discord.Interaction):
         return await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
 
     guild_id = interaction.guild_id
-    active_event = active_events.get(guild_id)
-    if not active_event:
+    active_event_id = active_events.get(guild_id)
+    if not active_event_id:
         return await interaction.response.send_message("No active event.", ephemeral=True)
 
-    rows = await get_event_attendees(active_event)
+    active_event = await get_event(active_event_id)
+    if not active_event:
+        return await interaction.response.send_message(
+            f"No event with ID `{active_event_id}` found", ephemeral=True
+        )
+
+    rows = await get_event_attendees(active_event_id)
 
     if not rows:
         return await interaction.response.send_message(
-            f"No attendees recorded yet for event `{active_event}`. Use `/snapshot_event` or `/event_add`.",
+            f"No attendees recorded yet for event `{active_event["name"]}` (ID: {active_event_id}). Use `/snapshot_event` or `/event_add`.",
             ephemeral=True
         )
 
@@ -336,7 +360,7 @@ async def event_list(interaction: discord.Interaction):
         lines.append(f"• {member.mention if member else f'Unknown ({row["user_id"]})'}")
 
     embed = discord.Embed(
-        title=f"📋 Attendance — Event `{active_event}`",
+        title=f"📋 Attendance — Event `{active_event["name"]}` (ID: {active_event_id})",
         description="\n".join(lines),
         colour=discord.Colour.teal()
     )
@@ -378,7 +402,6 @@ async def event_export(interaction: discord.Interaction, event_id: int):
 
     # Verify the event belongs to this guild
     row = await get_event_in_guild(event_id, interaction.guild_id)
-
     if not row:
         return await interaction.response.send_message(
             f"No event with ID `{event_id}` found for this server. Use `/events_saved` to browse.", ephemeral=True
@@ -388,7 +411,7 @@ async def event_export(interaction: discord.Interaction, event_id: int):
 
     buffer, event_name, count = await build_event_xlsx(bot, event_id, interaction.guild)
     safe_name = "".join(c for c in event_name if c.isalnum() or c in " _-").strip().replace(" ", "_")
-    filename = f"event_{event_id}_{safe_name}.xlsx"
+    filename = f"event_{event_id}_{safe_name}-{int(time.time())}.xlsx"
 
     await interaction.followup.send(
         f"✅ Export for **{event_name}** (ID: `{event_id}`) — {count} attendee(s).",
@@ -415,9 +438,8 @@ async def event_delete(interaction: discord.Interaction, event_id: int):
     if not await is_admin(interaction.user):
         return await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
 
-    row = await get_event_in_guild(event_id, interaction.guild_id)
-
-    if not row:
+    event = await get_event_in_guild(event_id, interaction.guild_id)
+    if not event:
         return await interaction.response.send_message(
             f"No event with ID `{event_id}` found for this server. Use `/events_saved` to browse.", ephemeral=True
         )
@@ -428,7 +450,7 @@ async def event_delete(interaction: discord.Interaction, event_id: int):
             f"Event `{event_id}` is currently **active**. Use `/cancel_event` to cancel it first.", ephemeral=True
         )
 
-    event_name = row["name"]
+    event_name = event["name"]
 
     await delete_event(event_id)
 
@@ -480,8 +502,8 @@ async def spend(interaction: discord.Interaction, member: discord.Member):
     await send_audit(interaction.guild, embed)
 
 
-@bot.tree.command(name="export", description="Export the full DKP leaderboard as an Excel file")
-async def export(interaction: discord.Interaction):
+@bot.tree.command(name="export_leaderboard", description="Export the full DKP leaderboard as an Excel file")
+async def export_leaderboard(interaction: discord.Interaction):
     if not interaction.guild_id or not interaction.guild or not isinstance(interaction.user, discord.Member):
         return await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
     
@@ -491,7 +513,7 @@ async def export(interaction: discord.Interaction):
     buffer, users = await build_dkp_xlsx(bot, interaction.guild)
 
     await interaction.response.send_message(
-        file=discord.File(buffer, filename="leaderboard.xlsx"), ephemeral=True
+        file=discord.File(buffer, filename=f"leaderboard-{int(time.time())}.xlsx"), ephemeral=True
     )
 
     embed = audit_embed("📤 Leaderboard Exported", discord.Colour.blurple())
@@ -558,6 +580,7 @@ async def import_leaderboard(interaction: discord.Interaction, file: discord.Att
 @bot.event
 async def on_ready():
     await init_db()
+    await load_active_events()
     await bot.tree.sync()
     logger.info("FRCoiN logged in as %s", bot.user)
 

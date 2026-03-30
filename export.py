@@ -85,11 +85,12 @@ async def build_dkp_xlsx(bot: commands.Bot, guild: discord.Guild):
                 user = await bot.fetch_user(uid)
                 name = user.name
             except discord.NotFound:
+                logger.warning("Could not fetch user %s during export", uid)
                 name = "Unknown"
             except discord.HTTPException as e:
-                logger.warning("Could not fetch user %s during export: %s", uid, e)
+                logger.error("Failed to fetch user %s during export: %s", uid, e)
                 name = "Unknown"
-        ws.append([i, name, uid, dkp])
+        ws.append([i, name, str(uid), dkp])
 
     buffer = io.BytesIO()
     wb.save(buffer)
