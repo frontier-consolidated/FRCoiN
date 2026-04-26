@@ -115,6 +115,24 @@ async def import_users(rows_to_import: list[tuple[int, int]]):
                 "INSERT INTO users (user_id, dkp) VALUES ($1, $2)", rows_to_import
             )
 
+async def get_dkp(user_id: int) -> int:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT dkp FROM users WHERE user_id = $1", user_id)
+    return row["dkp"] if row else 0
+
+async def get_dkp_log_entries(guild_id: int, user_id: int, limit: int = 10):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT amount, reason, issued_by_id, created_at
+            FROM dkp_log
+            WHERE guild_id = $1 AND target_user_id = $2
+            ORDER BY created_at DESC
+            LIMIT $3
+        """, guild_id, user_id, limit)
+    return rows
+
 async def get_config(key: str):
     pool = await get_pool()
     async with pool.acquire() as conn:

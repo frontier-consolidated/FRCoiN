@@ -26,7 +26,7 @@ from discord.ext import commands
 from discord import app_commands
 
 from audit_logs import audit_embed, send_audit
-from db import import_users, init_db, set_config, set_dkp
+from db import get_config, get_dkp, get_dkp_log_entries, import_users, init_db, set_config, set_dkp
 from events import active_events, add_event_attendee, create_event, delete_event, get_completed_events, get_event, get_event_attendees, get_event_in_guild, load_active_events, remove_event_attendee, take_event_attendance
 from export import build_dkp_xlsx, build_event_xlsx
 from helpers import get_org_role_ids, is_admin, member_has_org_role, parse_role_ids
@@ -572,6 +572,98 @@ async def import_leaderboard(interaction: discord.Interaction, file: discord.Att
     embed.add_field(name="Imported By", value=interaction.user.mention, inline=False)
     embed.add_field(name="Rows Imported", value=str(len(rows_to_import)), inline=True)
     await send_audit(interaction.guild, embed)
+
+
+@bot.tree.command(name="dkp", description="Check DKP balance — yours, or another member's (admin only)")
+@app_commands.describe(member="Member to look up (leave blank to check your own balance)")
+async def dkp(interaction: discord.Interaction, member: discord.Member | None = None):
+    if not interaction.guild_id or not interaction.guild or not isinstance(interaction.user, discord.Member):
+        return await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+
+    target = member or interaction.user
+
+    if target != interaction.user and not await is_admin(interaction.user):
+        return await interaction.response.send_message("You can only check your own DKP.", ephemeral=True)
+
+    balance = await get_dkp(target.id)
+
+    embed = discord.Embed(title="💰 DKP Balance", colour=discord.Colour.gold())
+    embed.add_field(name="Member", value=target.mention, inline=True)
+    embed.add_field(name="Balance", value=str(balance), inline=True)
+    embed.set_footer(text="FRCoiN")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@bot.tree.command(name="dkp_log", description="View recent DKP transactions for a member")
+@app_commands.describe(member="The member whose transaction history to view")
+async def dkp_log(interaction: discord.Interaction, member: discord.Member):
+    if not interaction.guild_id or not interaction.guild or not isinstance(interaction.user, discord.Member):
+        return await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+
+    if not await is_admin(interaction.user):
+        return await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
+
+    entries = await get_dkp_log_entries(interaction.guild_id, member.id)
+
+    embed = discord.Embed(title=f"📜 DKP Log — {member.display_name}", colour=discord.Colour.blurple())
+
+    if not entries:
+        embed.description = "No DKP transactions recorded for this member."
+    else:
+        lines = []
+        for row in entries:
+            amount = row["amount"]
+            sign = "+" if amount >= 0 else ""
+            reason = row["reason"] or "—"
+            issued_by = f"<@{row['issued_by_id']}>" if row["issued_by_id"] else "system"
+            ts = row["created_at"].strftime("%Y-%m-%d %H:%M UTC")
+            lines.append(f"`{sign}{amount}` • {reason} • by {issued_by} • {ts}")
+        embed.description = "\n".join(lines)
+
+    embed.set_footer(text="Showing last 10 entries • FRCoiN")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@bot.tree.command(name="status", description="Show FRCoiN bot status and current configuration")
+async def status(interaction: discord.Interaction):
+    if not interaction.guild_id or not interaction.guild or not isinstance(interaction.user, discord.Member):
+        return await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+
+    if not await is_admin(interaction.user):
+        return await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
+
+    guild_id = interaction.guild_id
+
+    active_event_id = active_events.get(guild_id)
+    if active_event_id:
+        active_event = await get_event(active_event_id)
+        event_str = f"`{active_event['name']}` (ID: {active_event_id})" if active_event else f"ID: {active_event_id}"
+    else:
+        event_str = "None"
+
+    lb_channel_id = await get_config("leaderboard_channel")
+    audit_channel_id = await get_config("audit_channel")
+    admin_role_ids = await get_config("admin_roles")
+    org_role_ids_raw = await get_config("org_roles")
+
+    lb_str = f"<#{lb_channel_id}>" if lb_channel_id else "Not set"
+    audit_str = f"<#{audit_channel_id}>" if audit_channel_id else "Not set"
+
+    if admin_role_ids:
+        admin_str = ", ".join(f"<@&{r}>" for r in admin_role_ids.split(",") if r.strip())
+    else:
+        admin_str = "Not set"
+
+    org_str = ", ".join(f"<@&{r}>" for r in org_role_ids_raw.split(",") if r.strip()) if org_role_ids_raw else "*(all members)*"
+
+    embed = discord.Embed(title="⚙️ FRCoiN Status", colour=discord.Colour.blurple())
+    embed.add_field(name="Active Event", value=event_str, inline=False)
+    embed.add_field(name="Leaderboard Channel", value=lb_str, inline=True)
+    embed.add_field(name="Audit Channel", value=audit_str, inline=True)
+    embed.add_field(name="Admin Roles", value=admin_str, inline=False)
+    embed.add_field(name="Org Roles (filter)", value=org_str, inline=False)
+    embed.set_footer(text="FRCoiN")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 # ------------------------
