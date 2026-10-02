@@ -4,11 +4,10 @@
 	"private": true,
 	"license": "MPL-2.0",
 	"devDependencies": {
-		"@pulumi/aws": "^7.6.0",
-		"@pulumi/cloudflare": "^6.8.0",
-		"@pulumi/docker": "^4.8.2",
-		"@pulumi/kubernetes": "^4.23.0",
-		"@pulumi/pulumi": "^3.192.0",
+		"@pulumi/aws": "^7.27.0",
+		"@pulumi/docker": "^5.0.0",
+		"@pulumi/kubernetes": "^4.30.0",
+		"@pulumi/pulumi": "^3.232.0",
 		"@types/node": "^24.3.0"
 	}
 }
