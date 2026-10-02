@@ -71,55 +71,45 @@ const namespace = new k8s.core.v1.Namespace(appName, {
 	}
 });
 
-const deployment = new k8s.apps.v1.Deployment(
-	appName,
-	{
-		metadata: {
-			namespace: namespace.metadata.name
+const deployment = new k8s.apps.v1.Deployment(appName, {
+	metadata: {
+		namespace: namespace.metadata.name
+	},
+	spec: {
+		selector: { matchLabels: appLabels },
+		replicas,
+		strategy: {
+			type: "RollingUpdate",
+			rollingUpdate: {
+				maxSurge: 1,
+				maxUnavailable: 1
+			}
 		},
-		spec: {
-			selector: { matchLabels: appLabels },
-			replicas,
-			strategy: {
-				type: "RollingUpdate",
-				rollingUpdate: {
-					maxSurge: 1,
-					maxUnavailable: 1
+		template: {
+			metadata: {
+				labels: appLabels,
+				annotations: {
+					"ecr/image-digest": image.repoDigest
 				}
 			},
-			template: {
-				metadata: {
-					labels: appLabels,
-					annotations: {
-						"ecr/image-digest": image.repoDigest
+			spec: {
+				containers: [
+					{
+						name: "bot",
+						image: image.imageName,
+						imagePullPolicy: "Always",
+						env: [
+							...["DATABASE_URL", "DISCORD_TOKEN"].map((name) => ({
+								name,
+								value: process.env[name]
+							}))
+						]
 					}
-				},
-				spec: {
-					containers: [
-						{
-							name: "bot",
-							image: image.imageName,
-							imagePullPolicy: "Always",
-							env: [
-								...["DATABASE_URL", "DISCORD_TOKEN"].map((name) => ({
-									name,
-									value: process.env[name]
-								}))
-							]
-						}
-					],
-					imagePullSecrets: [{ name: "ecr-reg-creds" }]
-				}
+				],
+				imagePullSecrets: [{ name: "ecr-reg-creds" }]
 			}
 		}
-	},
-	{
-		dependsOn: [image],
-		customTimeouts: {
-			create: "5m",
-			update: "5m"
-		}
 	}
-);
+});
 
 export const deploymentStatus = deployment.status;
