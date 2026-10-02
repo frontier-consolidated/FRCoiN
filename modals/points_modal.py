@@ -18,6 +18,16 @@ class PointsModal(discord.ui.Modal, title="Enter DKP Points"):
         self.guild_id = guild_id
         self.issued_by = issued_by
 
+        if not self.event_mode:
+            self.reason = discord.ui.TextInput(
+                label="Reason",
+                placeholder="e.g. Correcting missed attendance",
+                style=discord.TextStyle.paragraph,
+                required=True,
+                max_length=200,
+            )
+            self.add_item(self.reason)
+
     async def on_submit(self, interaction: discord.Interaction):
         try:
             value = int(self.points.value)
@@ -70,8 +80,9 @@ class PointsModal(discord.ui.Modal, title="Enter DKP Points"):
             await send_audit(interaction.guild, embed)
 
         elif self.target_user:
+            reason_text = self.reason.value.strip()
             await add_dkp(self.target_user.id, value, guild_id=guild_id,
-                           reason="manual_adjust", issued_by_id=issued_by_id)
+                           reason=f"manual_adjust: {reason_text}", issued_by_id=issued_by_id)
             await update_leaderboard(self.bot)
             await interaction.response.send_message(
                 f"✅ Updated **{self.target_user.display_name}** by **{value:+} DKP**.", ephemeral=True
@@ -80,5 +91,6 @@ class PointsModal(discord.ui.Modal, title="Enter DKP Points"):
             embed = audit_embed("✏️ DKP Manually Adjusted", discord.Colour.orange())
             embed.add_field(name="Member", value=self.target_user.mention, inline=True)
             embed.add_field(name="Adjustment", value=f"{value:+}", inline=True)
+            embed.add_field(name="Reason", value=reason_text, inline=False)
             embed.add_field(name="Issued By", value=interaction.user.mention, inline=False)
             await send_audit(interaction.guild, embed)

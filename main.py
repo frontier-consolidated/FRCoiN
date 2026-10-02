@@ -582,8 +582,11 @@ async def dkp(interaction: discord.Interaction, member: discord.Member | None = 
 
     target = member or interaction.user
 
-    if target != interaction.user and not await is_admin(interaction.user):
-        return await interaction.response.send_message("You can only check your own DKP.", ephemeral=True)
+    if target != interaction.user:
+        org_role_ids = await get_org_role_ids()
+        is_org_member = bool(org_role_ids) and member_has_org_role(interaction.user, org_role_ids)
+        if not await is_admin(interaction.user) and not is_org_member:
+            return await interaction.response.send_message("You can only check your own DKP.", ephemeral=True)
 
     balance = await get_dkp(target.id)
 
