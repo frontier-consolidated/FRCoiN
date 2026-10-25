@@ -11,6 +11,14 @@ async def is_admin(member: discord.Member) -> bool:
         return False
     return any(str(r.id) in roles.split(",") for r in member.roles)
 
+async def is_officer(member: discord.Member) -> bool:
+    if await is_admin(member):
+        return True
+    roles = await get_config("officer_roles")
+    if not roles:
+        return False
+    return any(str(r.id) in roles.split(",") for r in member.roles)
+
 # ------------------------
 # ORG ROLE FILTERING
 # ------------------------

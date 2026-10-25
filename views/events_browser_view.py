@@ -24,13 +24,13 @@ class EventsBrowserView(discord.ui.View):
 
     def build_embed(self) -> discord.Embed:
         embed = discord.Embed(
-            title="📁 Saved Events",
+            title="Saved Events",
             colour=discord.Colour.teal(),
             description="Select an event ID with `/event_export <id>` or `/event_delete <id>`."
         )
         page_events = self._current_page_events()
         for ev in page_events:
-            status = "✅ Ended" if ev["ended"] else "🔴 Active / Cancelled"
+            status = "Ended" if ev["ended"] else "Active / Cancelled"
             dkp_str = f"{ev['dkp_awarded']} DKP" if ev["dkp_awarded"] is not None else "—"
             ts = ev["created_at"].strftime("%Y-%m-%d %H:%M UTC") if ev["created_at"] else "Unknown"
             embed.add_field(

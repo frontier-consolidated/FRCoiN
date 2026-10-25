@@ -5,6 +5,7 @@ from db import add_dkp
 from audit_logs import audit_embed, send_audit
 from events import active_events, get_event_attendees, end_event
 from leaderboard import update_leaderboard
+from logger import logger
 
 class PointsModal(discord.ui.Modal, title="Enter DKP Points"):
     points = discord.ui.TextInput(label="Points (+ or -)", placeholder="e.g. 5 or -3")
@@ -69,10 +70,10 @@ class PointsModal(discord.ui.Modal, title="Enter DKP Points"):
             active_events.pop(guild_id, None)
 
             await interaction.response.send_message(
-                f"✅ Awarded **{value} DKP** to **{len(attendees)} users**.", ephemeral=True
+                f"Awarded **{value} DKP** to **{len(attendees)} users**.", ephemeral=True
             )
 
-            embed = audit_embed("📋 Event DKP Awarded", discord.Colour.green())
+            embed = audit_embed("Event DKP Awarded", discord.Colour.green())
             embed.add_field(name="Event ID", value=str(active_event), inline=True)
             embed.add_field(name="Points", value=f"{value:+}", inline=True)
             embed.add_field(name="Recipients", value=str(len(attendees)), inline=True)
@@ -85,12 +86,23 @@ class PointsModal(discord.ui.Modal, title="Enter DKP Points"):
                            reason=f"manual_adjust: {reason_text}", issued_by_id=issued_by_id)
             await update_leaderboard(self.bot)
             await interaction.response.send_message(
-                f"✅ Updated **{self.target_user.display_name}** by **{value:+} DKP**.", ephemeral=True
+                f"Updated **{self.target_user.display_name}** by **{value:+} DKP**.", ephemeral=True
             )
 
-            embed = audit_embed("✏️ DKP Manually Adjusted", discord.Colour.orange())
+            embed = audit_embed("DKP Manually Adjusted", discord.Colour.orange())
             embed.add_field(name="Member", value=self.target_user.mention, inline=True)
             embed.add_field(name="Adjustment", value=f"{value:+}", inline=True)
             embed.add_field(name="Reason", value=reason_text, inline=False)
             embed.add_field(name="Issued By", value=interaction.user.mention, inline=False)
             await send_audit(interaction.guild, embed)
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
+        logger.error("Unhandled error in PointsModal (event_mode=%s): %s", self.event_mode, error, exc_info=error)
+        message = "Something went wrong processing that submission. The issue has been logged."
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(message, ephemeral=True)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)
+        except discord.HTTPException as e:
+            logger.warning("Could not notify user of modal error: %s", e)

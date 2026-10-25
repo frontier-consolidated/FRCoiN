@@ -15,6 +15,11 @@ async def get_pool() -> asyncpg.Pool:
 
     DATABASE_URL = os.getenv("DATABASE_URL")
 
+    if DATABASE_URL is None:
+        raise RuntimeError(
+            "DATABASE_URL is not set. Copy .env.example to .env and fill in your PostgreSQL connection string."
+        )
+
     if db_pool is None:
         db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
     return db_pool
@@ -121,7 +126,7 @@ async def get_dkp(user_id: int) -> int:
         row = await conn.fetchrow("SELECT dkp FROM users WHERE user_id = $1", user_id)
     return row["dkp"] if row else 0
 
-async def get_dkp_log_entries(guild_id: int, user_id: int, limit: int = 10):
+async def get_dkp_log_entries(guild_id: int, user_id: int, limit: int = 500):
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch("""

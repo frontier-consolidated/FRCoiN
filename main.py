@@ -25,14 +25,15 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 
-from audit_logs import audit_embed, send_audit
+from audit_logs import audit_embed, send_audit, send_audit_with_file
 from db import get_config, get_dkp, get_dkp_log_entries, import_users, init_db, set_config, set_dkp
 from events import active_events, add_event_attendee, create_event, delete_event, get_completed_events, get_event, get_event_attendees, get_event_in_guild, load_active_events, remove_event_attendee, take_event_attendance
 from export import build_dkp_xlsx, build_event_xlsx
-from helpers import get_org_role_ids, is_admin, member_has_org_role, parse_role_ids
+from helpers import get_org_role_ids, is_admin, is_officer, member_has_org_role, parse_role_ids
 from leaderboard import update_leaderboard
 from modals.points_modal import PointsModal
 from views.events_browser_view import EventsBrowserView
+from views.dkp_log_browser_view import DkpLogBrowserView
 from logger import logger
 
 load_dotenv()
@@ -47,19 +48,21 @@ bot = commands.Bot(command_prefix=commands.when_mentioned, intents=intents)
 # SLASH COMMANDS
 # ------------------------
 
-@bot.tree.command(name="setup", description="Configure FRCoiN — admin roles, leaderboard channel, audit channel, and org roles")
+@bot.tree.command(name="setup", description="Configure FRCoiN — update only the options you pass, everything else stays as-is")
 @app_commands.describe(
-    leaderboard_channel="Channel where the leaderboard message will live",
-    admin_roles="Role mentions or role IDs separated by commas (bot admins)",
-    audit_channel="Channel where all bot actions will be logged",
-    org_roles="Role mentions or IDs for org members (used to filter snapshots). Leave blank to allow all."
+    leaderboard_channel="Channel where the leaderboard message will live (leave blank to keep current)",
+    admin_roles="Role mentions or role IDs separated by commas, full bot admins (leave blank to keep current)",
+    audit_channel="Channel where all bot actions will be logged (leave blank to keep current)",
+    org_roles="Role mentions or IDs for org members, used to filter snapshots (leave blank to keep current; 'none' to clear)",
+    officer_roles="Role mentions or IDs for officers, day-to-day ops below admin (leave blank to keep current; 'none' to clear)"
 )
 async def setup(
     interaction: discord.Interaction,
-    leaderboard_channel: discord.TextChannel,
-    admin_roles: str,
-    audit_channel: discord.TextChannel,
-    org_roles: str = ""
+    leaderboard_channel: discord.TextChannel | None = None,
+    admin_roles: str | None = None,
+    audit_channel: discord.TextChannel | None = None,
+    org_roles: str | None = None,
+    officer_roles: str | None = None
 ):
     if not interaction.guild or not isinstance(interaction.user, discord.Member):
         return await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
@@ -69,46 +72,73 @@ async def setup(
             "You need Administrator permission to run setup.", ephemeral=True
         )
 
-    role_ids = parse_role_ids(admin_roles)
-    if not role_ids:
+    if leaderboard_channel is None and admin_roles is None and audit_channel is None and org_roles is None and officer_roles is None:
         return await interaction.response.send_message(
-            "No valid admin role mentions or IDs found. Separate multiple roles with commas.", ephemeral=True
+            "You didn't pass any options to change. Provide at least one of: "
+            "`leaderboard_channel`, `admin_roles`, `audit_channel`, `org_roles`, `officer_roles`.",
+            ephemeral=True
         )
 
-    await set_config("admin_roles", ",".join(str(r) for r in role_ids))
-    await set_config("leaderboard_channel", leaderboard_channel.id)
-    await set_config("audit_channel", audit_channel.id)
+    changes = []  # (label, display value) pairs, for the confirmation + audit embed
 
-    org_summary = "*(none — all members allowed)*"
-    if org_roles.strip():
-        org_ids = parse_role_ids(org_roles)
-        if org_ids:
-            await set_config("org_roles", ",".join(str(r) for r in org_ids))
-            org_summary = ", ".join(f"<@&{r}>" for r in org_ids)
-        else:
+    if leaderboard_channel is not None:
+        await set_config("leaderboard_channel", leaderboard_channel.id)
+        changes.append(("Leaderboard Channel", leaderboard_channel.mention))
+
+    if admin_roles is not None:
+        role_ids = parse_role_ids(admin_roles)
+        if not role_ids:
             return await interaction.response.send_message(
-                "No valid org role mentions or IDs found in `org_roles`.", ephemeral=True
+                "No valid admin role mentions or IDs found in `admin_roles`. Separate multiple roles with commas.",
+                ephemeral=True
             )
-    else:
-        # Clear any previously set org_roles
-        await set_config("org_roles", "")
+        await set_config("admin_roles", ",".join(str(r) for r in role_ids))
+        changes.append(("Admin Roles", ", ".join(f"<@&{r}>" for r in role_ids)))
+
+    if audit_channel is not None:
+        await set_config("audit_channel", audit_channel.id)
+        changes.append(("Audit Channel", audit_channel.mention))
+
+    if org_roles is not None:
+        if org_roles.strip().lower() in ("", "none", "clear"):
+            await set_config("org_roles", "")
+            changes.append(("Org Roles", "*(cleared — all members allowed)*"))
+        else:
+            org_ids = parse_role_ids(org_roles)
+            if not org_ids:
+                return await interaction.response.send_message(
+                    "No valid org role mentions or IDs found in `org_roles`. Pass `none` to clear it.",
+                    ephemeral=True
+                )
+            await set_config("org_roles", ",".join(str(r) for r in org_ids))
+            changes.append(("Org Roles", ", ".join(f"<@&{r}>" for r in org_ids)))
+
+    if officer_roles is not None:
+        if officer_roles.strip().lower() in ("", "none", "clear"):
+            await set_config("officer_roles", "")
+            changes.append(("Officer Roles", "*(cleared — officer tier disabled, admins only)*"))
+        else:
+            officer_ids = parse_role_ids(officer_roles)
+            if not officer_ids:
+                return await interaction.response.send_message(
+                    "No valid officer role mentions or IDs found in `officer_roles`. Pass `none` to clear it.",
+                    ephemeral=True
+                )
+            await set_config("officer_roles", ",".join(str(r) for r in officer_ids))
+            changes.append(("Officer Roles", ", ".join(f"<@&{r}>" for r in officer_ids)))
 
     await update_leaderboard(bot)
 
+    summary = "\n".join(f"{label}: {value}" for label, value in changes)
     await interaction.response.send_message(
-        f"✅ **FRCoiN** setup complete.\n"
-        f"📊 Leaderboard channel: {leaderboard_channel.mention}\n"
-        f"🔍 Audit channel: {audit_channel.mention}\n"
-        f"🛡️ Org roles (snapshot filter): {org_summary}",
+        f"**FRCoiN** setup updated.\n{summary}",
         ephemeral=True
     )
 
-    embed = audit_embed("⚙️ FRCoiN Setup Run", discord.Colour.blue())
+    embed = audit_embed("FRCoiN Setup Run", discord.Colour.blue())
     embed.add_field(name="Run By", value=interaction.user.mention, inline=False)
-    embed.add_field(name="Leaderboard Channel", value=leaderboard_channel.mention, inline=True)
-    embed.add_field(name="Audit Channel", value=audit_channel.mention, inline=True)
-    embed.add_field(name="Admin Role IDs", value=", ".join(str(r) for r in role_ids), inline=False)
-    embed.add_field(name="Org Roles", value=org_summary, inline=False)
+    for label, value in changes:
+        embed.add_field(name=label, value=value, inline=False)
     await send_audit(interaction.guild, embed)
 
 
@@ -118,7 +148,7 @@ async def start_event(interaction: discord.Interaction, name: str):
     if not interaction.guild_id or not interaction.guild or not isinstance(interaction.user, discord.Member):
         return await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
     
-    if not await is_admin(interaction.user):
+    if not await is_officer(interaction.user):
         return await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
 
     guild_id = interaction.guild_id
@@ -130,12 +160,12 @@ async def start_event(interaction: discord.Interaction, name: str):
     event = await create_event(guild_id, name)
 
     await interaction.response.send_message(
-        f"✅ Event **{name}** started (ID: `{event['id']}`).\n"
+        f"Event **{name}** started (ID: `{event['id']}`).\n"
         f"Use `/snapshot_event` to capture attendees, then `/end_event` to allocate DKP.",
         ephemeral=True
     )
 
-    embed = audit_embed("🎯 Event Started", discord.Colour.teal())
+    embed = audit_embed("Event Started", discord.Colour.teal())
     embed.add_field(name="Event", value=name, inline=True)
     embed.add_field(name="Event ID", value=str(event["id"]), inline=True)
     embed.add_field(name="Started By", value=interaction.user.mention, inline=False)
@@ -147,13 +177,13 @@ async def start_event(interaction: discord.Interaction, name: str):
     description="Capture voice channel members into the active event, with optional org-role filtering"
 )
 @app_commands.describe(
-    org_only="If True, only capture members with a configured org role (ignores non-org attendees)"
+    org_only="If False, capture every voice member including non-org guests (default: True — org members only)"
 )
-async def snapshot_event(interaction: discord.Interaction, org_only: bool = False):
+async def snapshot_event(interaction: discord.Interaction, org_only: bool = True):
     if not interaction.guild_id or not interaction.guild or not isinstance(interaction.user, discord.Member):
         return await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
     
-    if not await is_admin(interaction.user):
+    if not await is_officer(interaction.user):
         return await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
 
     guild_id = interaction.guild_id
@@ -171,9 +201,9 @@ async def snapshot_event(interaction: discord.Interaction, org_only: bool = Fals
         )
 
     all_members = [m for m in interaction.user.voice.channel.members if not m.bot]
+    org_role_ids = await get_org_role_ids()
 
     if org_only:
-        org_role_ids = await get_org_role_ids()
         if not org_role_ids:
             return await interaction.response.send_message(
                 "No org roles are configured. Set them with `/setup` first, or use `/snapshot_event org_only:False`.",
@@ -183,22 +213,24 @@ async def snapshot_event(interaction: discord.Interaction, org_only: bool = Fals
         skipped = len(all_members) - len(members)
     else:
         members = all_members
-        skipped = 0
+        skipped = len([m for m in all_members if org_role_ids and not member_has_org_role(m, org_role_ids)])
 
     await take_event_attendance(active_event_id, members)
 
-    filter_note = f" *(org-only filter applied, {skipped} non-org member(s) skipped)*" if org_only else ""
+    filter_note = f" *(org_only disabled — capturing everyone, including {skipped} non-org member(s))*" if not org_only else ""
     await interaction.response.send_message(
-        f"✅ Captured **{len(members)} users** into event `{active_event["name"]}` (ID: {active_event_id}).{filter_note}", ephemeral=True
+        f"Captured **{len(members)} users** into event `{active_event["name"]}` (ID: {active_event_id}).{filter_note}", ephemeral=True
     )
 
-    embed = audit_embed("📸 Event Snapshot Taken", discord.Colour.teal())
+    embed = audit_embed("Event Snapshot Taken", discord.Colour.teal())
     embed.add_field(name="Event", value=active_event["name"], inline=True)
     embed.add_field(name="Event ID", value=str(active_event_id), inline=True)
     embed.add_field(name="Captured", value=f"{len(members)} users", inline=True)
-    embed.add_field(name="Org-Only Filter", value="Yes" if org_only else "No", inline=True)
+    embed.add_field(name="Org-Only Filter", value="Yes (default)" if org_only else "No — everyone captured", inline=True)
     if org_only:
         embed.add_field(name="Skipped (non-org)", value=str(skipped), inline=True)
+    else:
+        embed.add_field(name="Non-Org Captured", value=str(skipped), inline=True)
     embed.add_field(name="By", value=interaction.user.mention, inline=False)
     names = ", ".join(m.display_name for m in members[:20])
     if len(members) > 20:
@@ -212,7 +244,7 @@ async def end_event(interaction: discord.Interaction):
     if not interaction.guild_id or not interaction.guild or not isinstance(interaction.user, discord.Member):
         return await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
     
-    if not await is_admin(interaction.user):
+    if not await is_officer(interaction.user):
         return await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
 
     if interaction.guild_id not in active_events:
@@ -228,7 +260,7 @@ async def cancel_event(interaction: discord.Interaction):
     if not interaction.guild_id or not interaction.guild or not isinstance(interaction.user, discord.Member):
         return await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
     
-    if not await is_admin(interaction.user):
+    if not await is_officer(interaction.user):
         return await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
 
     guild_id = interaction.guild_id
@@ -238,9 +270,9 @@ async def cancel_event(interaction: discord.Interaction):
     event_id = active_events.pop(guild_id)
     await delete_event(event_id)
 
-    await interaction.response.send_message("✅ Active event cancelled. No DKP was awarded.", ephemeral=True)
+    await interaction.response.send_message("Active event cancelled. No DKP was awarded.", ephemeral=True)
 
-    embed = audit_embed("❌ Event Cancelled", discord.Colour.red())
+    embed = audit_embed("Event Cancelled", discord.Colour.red())
     embed.add_field(name="Event ID", value=str(event_id), inline=True)
     embed.add_field(name="Cancelled By", value=interaction.user.mention, inline=False)
     await send_audit(interaction.guild, embed)
@@ -252,7 +284,7 @@ async def event_add(interaction: discord.Interaction, member: discord.Member):
     if not interaction.guild_id or not interaction.guild or not isinstance(interaction.user, discord.Member):
         return await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
     
-    if not await is_admin(interaction.user):
+    if not await is_officer(interaction.user):
         return await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
 
     guild_id = interaction.guild_id
@@ -277,10 +309,10 @@ async def event_add(interaction: discord.Interaction, member: discord.Member):
         )
 
     await interaction.response.send_message(
-        f"✅ Added **{member.display_name}** to event `{active_event["name"]}` (ID: {active_event_id}).", ephemeral=True
+        f"Added **{member.display_name}** to event `{active_event["name"]}` (ID: {active_event_id}).", ephemeral=True
     )
 
-    embed = audit_embed("➕ Attendee Added to Event", discord.Colour.green())
+    embed = audit_embed("Attendee Added to Event", discord.Colour.green())
     embed.add_field(name="Event", value=active_event["name"], inline=True)
     embed.add_field(name="Event ID", value=str(active_event_id), inline=True)
     embed.add_field(name="Member", value=member.mention, inline=True)
@@ -294,7 +326,7 @@ async def event_remove(interaction: discord.Interaction, member: discord.Member)
     if not interaction.guild_id or not interaction.guild or not isinstance(interaction.user, discord.Member):
         return await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
     
-    if not await is_admin(interaction.user):
+    if not await is_officer(interaction.user):
         return await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
 
     guild_id = interaction.guild_id
@@ -316,12 +348,12 @@ async def event_remove(interaction: discord.Interaction, member: discord.Member)
         )
 
     await interaction.response.send_message(
-        f"✅ Removed **{member.display_name}** from event `{active_event["name"]}` (ID: {active_event_id}).", ephemeral=True
+        f"Removed **{member.display_name}** from event `{active_event["name"]}` (ID: {active_event_id}).", ephemeral=True
     )
 
-    embed = audit_embed("➖ Attendee Removed from Event", discord.Colour.orange())
+    embed = audit_embed("Attendee Removed from Event", discord.Colour.orange())
     embed.add_field(name="Event", value=active_event["name"], inline=True)
-    embed.add_field(name="Event ID", value=str(active_event), inline=True)
+    embed.add_field(name="Event ID", value=str(active_event_id), inline=True)
     embed.add_field(name="Member", value=member.mention, inline=True)
     embed.add_field(name="Removed By", value=interaction.user.mention, inline=False)
     await send_audit(interaction.guild, embed)
@@ -332,7 +364,7 @@ async def event_attendance(interaction: discord.Interaction):
     if not interaction.guild_id or not interaction.guild or not isinstance(interaction.user, discord.Member):
         return await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
     
-    if not await is_admin(interaction.user):
+    if not await is_officer(interaction.user):
         return await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
 
     guild_id = interaction.guild_id
@@ -360,7 +392,7 @@ async def event_attendance(interaction: discord.Interaction):
         lines.append(f"• {member.mention if member else f'Unknown ({row["user_id"]})'}")
 
     embed = discord.Embed(
-        title=f"📋 Attendance — Event `{active_event["name"]}` (ID: {active_event_id})",
+        title=f"Attendance — Event `{active_event["name"]}` (ID: {active_event_id})",
         description="\n".join(lines),
         colour=discord.Colour.teal()
     )
@@ -375,7 +407,7 @@ async def events_saved(interaction: discord.Interaction):
     if not interaction.guild_id or not interaction.guild or not isinstance(interaction.user, discord.Member):
         return await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
     
-    if not await is_admin(interaction.user):
+    if not await is_officer(interaction.user):
         return await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
 
     events = await get_completed_events(interaction.guild_id)
@@ -397,7 +429,7 @@ async def event_export(interaction: discord.Interaction, event_id: int):
     if not interaction.guild_id or not interaction.guild or not isinstance(interaction.user, discord.Member):
         return await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
         
-    if not await is_admin(interaction.user):
+    if not await is_officer(interaction.user):
         return await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
 
     # Verify the event belongs to this guild
@@ -414,12 +446,12 @@ async def event_export(interaction: discord.Interaction, event_id: int):
     filename = f"event_{event_id}_{safe_name}-{int(time.time())}.xlsx"
 
     await interaction.followup.send(
-        f"✅ Export for **{event_name}** (ID: `{event_id}`) — {count} attendee(s).",
+        f"Export for **{event_name}** (ID: `{event_id}`) — {count} attendee(s).",
         file=discord.File(buffer, filename=filename),
         ephemeral=True
     )
 
-    embed = audit_embed("📤 Event Exported", discord.Colour.blurple())
+    embed = audit_embed("Event Exported", discord.Colour.blurple())
     embed.add_field(name="Event ID", value=str(event_id), inline=True)
     embed.add_field(name="Event Name", value=event_name, inline=True)
     embed.add_field(name="Attendees", value=str(count), inline=True)
@@ -455,11 +487,11 @@ async def event_delete(interaction: discord.Interaction, event_id: int):
     await delete_event(event_id)
 
     await interaction.response.send_message(
-        f"🗑️ Event **{event_name}** (ID: `{event_id}`) and all its attendance records have been deleted.",
+        f"Event **{event_name}** (ID: `{event_id}`) and all its attendance records have been deleted.",
         ephemeral=True
     )
 
-    embed = audit_embed("🗑️ Event Deleted", discord.Colour.red())
+    embed = audit_embed("Event Deleted", discord.Colour.red())
     embed.add_field(name="Event ID", value=str(event_id), inline=True)
     embed.add_field(name="Event Name", value=event_name, inline=True)
     embed.add_field(name="Deleted By", value=interaction.user.mention, inline=False)
@@ -474,7 +506,7 @@ async def adjust(interaction: discord.Interaction, member: discord.Member):
     if not interaction.guild_id or not interaction.guild or not isinstance(interaction.user, discord.Member):
         return await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
     
-    if not await is_admin(interaction.user):
+    if not await is_officer(interaction.user):
         return await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
 
     await interaction.response.send_modal(
@@ -482,23 +514,49 @@ async def adjust(interaction: discord.Interaction, member: discord.Member):
     )
 
 
-@bot.tree.command(name="spend", description="Reset a member's DKP to 0 (they spent their points)")
-@app_commands.describe(member="The member whose DKP should be reset to 0")
-async def spend(interaction: discord.Interaction, member: discord.Member):
+@bot.tree.command(name="spend", description="Deduct DKP a member has spent (leave amount blank to reset to 0)")
+@app_commands.describe(
+    member="The member whose DKP should be spent",
+    reason="Why this spend is happening (shown in the DKP log and audit channel)",
+    amount="Amount to deduct (leave blank to reset the member's balance to 0)"
+)
+async def spend(interaction: discord.Interaction, member: discord.Member, reason: str, amount: int | None = None):
     if not interaction.guild_id or not interaction.guild or not isinstance(interaction.user, discord.Member):
         return await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
-    
+
     if not await is_admin(interaction.user):
         return await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
 
-    await set_dkp(member.id, 0, guild_id=interaction.guild_id, reason="spent", issued_by_id=interaction.user.id)
-    await update_leaderboard(bot)
-    await interaction.response.send_message(f"✅ Reset **{member.display_name}**'s DKP to 0.", ephemeral=True)
+    if amount is not None and amount < 0:
+        return await interaction.response.send_message(
+            "Amount must be a positive number to deduct — use `/adjust` to add DKP.", ephemeral=True
+        )
 
-    embed = audit_embed("💸 DKP Spent / Reset", discord.Colour.red())
+    current = await get_dkp(member.id)
+
+    if amount is None:
+        new_balance = 0
+    else:
+        new_balance = max(0, current - amount)
+
+    deducted = current - new_balance
+    clamped_note = ""
+    if amount is not None and amount > current:
+        clamped_note = f" (requested {amount}, but **{member.display_name}** only had {current} — balance reset to 0)"
+
+    await set_dkp(member.id, new_balance, guild_id=interaction.guild_id, reason=reason, issued_by_id=interaction.user.id)
+    await update_leaderboard(bot)
+    await interaction.response.send_message(
+        f"**{member.display_name}**'s DKP reduced by **{deducted}** → new balance **{new_balance}**.{clamped_note}",
+        ephemeral=True
+    )
+
+    embed = audit_embed("DKP Spent", discord.Colour.red())
     embed.add_field(name="Member", value=member.mention, inline=True)
-    embed.add_field(name="New Balance", value="0", inline=True)
-    embed.add_field(name="Reset By", value=interaction.user.mention, inline=False)
+    embed.add_field(name="Previous Balance", value=str(current), inline=True)
+    embed.add_field(name="New Balance", value=str(new_balance), inline=True)
+    embed.add_field(name="Reason", value=reason, inline=False)
+    embed.add_field(name="Spent By", value=interaction.user.mention, inline=False)
     await send_audit(interaction.guild, embed)
 
 
@@ -516,7 +574,7 @@ async def export_leaderboard(interaction: discord.Interaction):
         file=discord.File(buffer, filename=f"leaderboard-{int(time.time())}.xlsx"), ephemeral=True
     )
 
-    embed = audit_embed("📤 Leaderboard Exported", discord.Colour.blurple())
+    embed = audit_embed("Leaderboard Exported", discord.Colour.blurple())
     embed.add_field(name="Exported By", value=interaction.user.mention, inline=False)
     embed.add_field(name="Rows", value=str(len(users)), inline=True)
     await send_audit(interaction.guild, embed)
@@ -563,12 +621,29 @@ async def import_leaderboard(interaction: discord.Interaction, file: discord.Att
             "No valid rows found. Expected columns: Rank, User, UserID, DKP.", ephemeral=True
         )
 
+    backup_buffer, backup_users = await build_dkp_xlsx(bot, interaction.guild)
+    backup_embed = audit_embed("Pre-Import Backup", discord.Colour.dark_grey())
+    backup_embed.description = "The leaderboard below is about to be **wiped and replaced** by an import. This is the pre-import snapshot."
+    backup_embed.add_field(name="Triggered By", value=f"{interaction.user.mention} running /import_leaderboard", inline=False)
+    backup_embed.add_field(name="Rows Backed Up", value=str(len(backup_users)), inline=True)
+    backup_sent = await send_audit_with_file(
+        interaction.guild, backup_embed,
+        discord.File(backup_buffer, filename=f"pre-import-backup-{int(time.time())}.xlsx")
+    )
+
+    if not backup_sent:
+        return await interaction.followup.send(
+            "Import aborted — couldn't post the automatic pre-import backup (no audit channel configured, "
+            "or the bot can't post there). Run `/setup` to set an audit channel first, then try again.",
+            ephemeral=True
+        )
+
     await import_users(rows_to_import)
 
     await update_leaderboard(bot)
-    await interaction.followup.send(f"✅ Imported **{len(rows_to_import)} users** successfully.", ephemeral=True)
+    await interaction.followup.send(f"Imported **{len(rows_to_import)} users** successfully.", ephemeral=True)
 
-    embed = audit_embed("📥 Leaderboard Imported", discord.Colour.orange())
+    embed = audit_embed("Leaderboard Imported", discord.Colour.orange())
     embed.add_field(name="Imported By", value=interaction.user.mention, inline=False)
     embed.add_field(name="Rows Imported", value=str(len(rows_to_import)), inline=True)
     await send_audit(interaction.guild, embed)
@@ -590,41 +665,36 @@ async def dkp(interaction: discord.Interaction, member: discord.Member | None = 
 
     balance = await get_dkp(target.id)
 
-    embed = discord.Embed(title="💰 DKP Balance", colour=discord.Colour.gold())
+    embed = discord.Embed(title="DKP Balance", colour=discord.Colour.gold())
     embed.add_field(name="Member", value=target.mention, inline=True)
     embed.add_field(name="Balance", value=str(balance), inline=True)
     embed.set_footer(text="FRCoiN")
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-@bot.tree.command(name="dkp_log", description="View recent DKP transactions for a member")
-@app_commands.describe(member="The member whose transaction history to view")
-async def dkp_log(interaction: discord.Interaction, member: discord.Member):
+@bot.tree.command(name="dkp_log", description="View DKP transaction history — yours, or another member's (officer/admin/org-role only)")
+@app_commands.describe(member="Member to look up (leave blank to view your own history)")
+async def dkp_log(interaction: discord.Interaction, member: discord.Member | None = None):
     if not interaction.guild_id or not interaction.guild or not isinstance(interaction.user, discord.Member):
         return await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
 
-    if not await is_admin(interaction.user):
-        return await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
+    target = member or interaction.user
 
-    entries = await get_dkp_log_entries(interaction.guild_id, member.id)
+    if target != interaction.user:
+        org_role_ids = await get_org_role_ids()
+        is_org_member = bool(org_role_ids) and member_has_org_role(interaction.user, org_role_ids)
+        if not await is_officer(interaction.user) and not is_org_member:
+            return await interaction.response.send_message("You can only view your own DKP log.", ephemeral=True)
 
-    embed = discord.Embed(title=f"📜 DKP Log — {member.display_name}", colour=discord.Colour.blurple())
+    entries = await get_dkp_log_entries(interaction.guild_id, target.id)
 
     if not entries:
+        embed = discord.Embed(title=f"DKP Log — {target.display_name}", colour=discord.Colour.blurple())
         embed.description = "No DKP transactions recorded for this member."
-    else:
-        lines = []
-        for row in entries:
-            amount = row["amount"]
-            sign = "+" if amount >= 0 else ""
-            reason = row["reason"] or "—"
-            issued_by = f"<@{row['issued_by_id']}>" if row["issued_by_id"] else "system"
-            ts = row["created_at"].strftime("%Y-%m-%d %H:%M UTC")
-            lines.append(f"`{sign}{amount}` • {reason} • by {issued_by} • {ts}")
-        embed.description = "\n".join(lines)
+        return await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    embed.set_footer(text="Showing last 10 entries • FRCoiN")
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    view = DkpLogBrowserView(entries=entries, target=target, invoker=interaction.user)
+    await interaction.response.send_message(embed=view.build_embed(), view=view, ephemeral=True)
 
 
 @bot.tree.command(name="status", description="Show FRCoiN bot status and current configuration")
@@ -632,7 +702,7 @@ async def status(interaction: discord.Interaction):
     if not interaction.guild_id or not interaction.guild or not isinstance(interaction.user, discord.Member):
         return await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
 
-    if not await is_admin(interaction.user):
+    if not await is_officer(interaction.user):
         return await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
 
     guild_id = interaction.guild_id
@@ -647,6 +717,7 @@ async def status(interaction: discord.Interaction):
     lb_channel_id = await get_config("leaderboard_channel")
     audit_channel_id = await get_config("audit_channel")
     admin_role_ids = await get_config("admin_roles")
+    officer_role_ids_raw = await get_config("officer_roles")
     org_role_ids_raw = await get_config("org_roles")
 
     lb_str = f"<#{lb_channel_id}>" if lb_channel_id else "Not set"
@@ -657,16 +728,38 @@ async def status(interaction: discord.Interaction):
     else:
         admin_str = "Not set"
 
+    officer_str = ", ".join(f"<@&{r}>" for r in officer_role_ids_raw.split(",") if r.strip()) if officer_role_ids_raw else "*(disabled — admins only)*"
+
     org_str = ", ".join(f"<@&{r}>" for r in org_role_ids_raw.split(",") if r.strip()) if org_role_ids_raw else "*(all members)*"
 
-    embed = discord.Embed(title="⚙️ FRCoiN Status", colour=discord.Colour.blurple())
+    embed = discord.Embed(title="FRCoiN Status", colour=discord.Colour.blurple())
     embed.add_field(name="Active Event", value=event_str, inline=False)
     embed.add_field(name="Leaderboard Channel", value=lb_str, inline=True)
     embed.add_field(name="Audit Channel", value=audit_str, inline=True)
     embed.add_field(name="Admin Roles", value=admin_str, inline=False)
+    embed.add_field(name="Officer Roles", value=officer_str, inline=False)
     embed.add_field(name="Org Roles (filter)", value=org_str, inline=False)
     embed.set_footer(text="FRCoiN")
     await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+# ------------------------
+# ERROR HANDLING
+# ------------------------
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    logger.error(
+        "Unhandled app command error in /%s: %s",
+        interaction.command.name if interaction.command else "?", error, exc_info=error
+    )
+    message = "Something went wrong running that command. The issue has been logged."
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
+    except discord.HTTPException as e:
+        logger.warning("Could not notify user of command error: %s", e)
 
 
 # ------------------------
@@ -679,5 +772,7 @@ async def on_ready():
     await bot.tree.sync()
     logger.info("FRCoiN logged in as %s", bot.user)
 
-TOKEN = cast(str, os.getenv("DISCORD_TOKEN"))
+TOKEN = os.getenv("DISCORD_TOKEN")
+if not TOKEN:
+    raise SystemExit("DISCORD_TOKEN is not set. Copy .env.example to .env and fill in your bot token.")
 bot.run(TOKEN)

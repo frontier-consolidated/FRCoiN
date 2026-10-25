@@ -25,7 +25,7 @@ async def update_leaderboard(bot: commands.Bot):
         return
 
     data = await get_all_users()
-    embed = discord.Embed(title="🏆 FRCoiN DKP Leaderboard", colour=discord.Colour.gold())
+    embed = discord.Embed(title="FRCoiN DKP Leaderboard", colour=discord.Colour.gold())
     lines = []
     guild = channel.guild
     for i, row in enumerate(data[:50], 1):
