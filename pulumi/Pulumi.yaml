@@ -1,7 +1,11 @@
 name: frcoin-bot
 description: Frontier Consolidated dkp tracker bot
+
 runtime:
     name: nodejs
     options:
         packagemanager: pnpm
         nodeargs: "--import tsx"
+
+config:
+    kubernetes:context: frcn
