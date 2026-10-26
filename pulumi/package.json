@@ -8,7 +8,6 @@
 		"@pulumi/kubernetes": "^4.30.0",
 		"@pulumi/pulumi": "^3.267.0",
 		"@types/node": "^24.3.0",
-		"tsx": "^4.23.15",
 		"typescript": "^6.0.0"
 	}
 }
