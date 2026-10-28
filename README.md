@@ -29,7 +29,7 @@ Frontier Consolidated "DKP" Bot
 | `/events_saved`, `/event_export` | Officer+ | Browse/export past events |
 | `/event_delete` | Admin | Permanently delete a saved event |
 | `/adjust` | Officer+ | Manual DKP +/- with required reason |
-| `/spend` | Admin | Deduct DKP (optional amount, or reset to 0), required reason |
+| `/spend` | Officer+ | Deduct DKP (optional amount, or reset to 0), required reason |
 | `/export_leaderboard`, `/import_leaderboard` | Admin | Full leaderboard backup/restore (auto-backs-up before import) |
 | `/dkp`, `/dkp_log` | Everyone (self) / Officer+ or org role (others) | Self-service balance + paginated history |
 | `/status` | Officer+ | Current config dump |

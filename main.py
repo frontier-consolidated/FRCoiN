@@ -524,7 +524,7 @@ async def spend(interaction: discord.Interaction, member: discord.Member, reason
     if not interaction.guild_id or not interaction.guild or not isinstance(interaction.user, discord.Member):
         return await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
 
-    if not await is_admin(interaction.user):
+    if not await is_officer(interaction.user):
         return await interaction.response.send_message("You don't have permission to do this.", ephemeral=True)
 
     if amount is not None and amount < 0:

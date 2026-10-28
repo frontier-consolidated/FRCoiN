@@ -2,6 +2,12 @@
 
 All notable changes to FRCoiN are documented here.
 
+## 2026-10-26
+
+### Changed
+
+- `/spend` now accepts the Officer tier, not just Admin.
+
 ## 2026-10-25
 
 ### Added
