@@ -42,7 +42,35 @@
 
 The upgrade is a straight file replacement. Allow about 10 minutes, at a quiet time between events.
 
-**Before:**
+### Discord prerequisites
+
+Do these in Discord before the deploy. None of them affect v1, so they can be done days ahead.
+
+**1. Bot permission.** Give the bot's role **Manage Roles** (Server Settings → Roles). The bot only uses it to set the panel channel's permissions. It never changes anyone's roles.
+
+**2. Org roles must be set.** In v1 they were an optional snapshot filter. In V2 **only org members can earn DKP**. If no org roles are set, DKP events and positive adjustments are blocked with a "run setup first" message. Check `/status` in v1: if *Org Roles* shows *(all members)*, run `/setup org_roles:@Member` (comma-separate several roles) before upgrading.
+
+**3. Channels**
+
+| Channel | New? | Who should see it | Suggested permissions |
+|---|---|---|---|
+| **Panel**, e.g. `#frcoin-panel` (text) | New, required | Admin + officer roles only | @everyone: View Channel ✗. Admin/officer roles: View Channel ✓, Read Message History ✓, Send Messages ✗. Bot: View Channel, Send Messages, Embed Links, Read Message History. **The bot sets all of this itself** when you run `/setup panel_channel`, provided it has Manage Roles. Just create the channel. |
+| **Leaderboard** (existing) | No | Everyone who can earn DKP | Members: View Channel, Read Message History. Send Messages can stay off: the new **My Points** button works without it. Bot: Send Messages, Embed Links. |
+| **Audit** (existing) | No | Admins/officers | Unchanged. Bot: Send Messages, Embed Links, Attach Files (for the pre-import backup). |
+| **Event voice category**, e.g. `EVENTS` holding Alpha, Bravo, Comms | Recommended | As now | Put squad voice channels under one category so a single snapshot covers all of them. The bot needs **View Channel** on each voice channel it should count, so check any private ones. Officers no longer need to be in voice to snapshot. |
+
+**4. Settings: what needs running after the update**
+
+| Setting | Needed? | How |
+|---|---|---|
+| Panel channel | **Required, new** | `/setup panel_channel:#frcoin-panel` |
+| Org roles | Required if not already set (see 2) | `/setup org_roles:…` |
+| Leaderboard, audit channels; admin, officer roles | No, they carry over | Change later only if wanted |
+| Slash command access | No, defaults to Officer+ (same as v1) | Switch to Admin-only later, in rollout phase 2 |
+
+After the panel channel is set, everything else can also be changed from **Admin → Setup: Channels / Roles** using pickers. `/setup` and the Setup buttons need the Discord **Administrator** permission, as in v1.
+
+**Before** (with the Discord prerequisites above done):
 1. Finish or cancel any open event (`/status` shows it). An open v1 event does carry over, but it's simpler not to have one.
 2. Tell officers there's a short freeze: no FRCoiN commands until the panel appears in `#frcoin-panel`. While the deploy swaps the old bot for the new one, both can briefly be online at the same time and answer the same command twice, and any form someone has open in the old bot is lost.
 3. Optional: run `/export_leaderboard` and keep the file (see below).
@@ -52,8 +80,8 @@ The upgrade is a straight file replacement. Allow about 10 minutes, at a quiet t
 5. On first start the bot migrates the database itself, re-syncs slash commands, and adds the My Points button to the leaderboard. No new environment variables or secrets are needed.
 
 **After:**
-6. In Discord: give the bot's role **Manage Roles**, then run `/setup panel_channel:#frcoin-panel`. The lobby should appear and the channel should become hidden from regular members.
-7. Run `/status`: it should show no lockdown warning. Check the leaderboard has a **My Points** button.
+6. Run `/setup panel_channel:#frcoin-panel`. The lobby should appear and the channel should become hidden from regular members. New commands (`/adjustment_mode`, `/admin_mode`) and options can take a minute to show up. Restart Discord (Ctrl+R) if they don't.
+7. Run `/status`: it should show no lockdown warning. If it does (e.g. Manage Roles was granted afterwards), grant the permission and run the same `/setup panel_channel:#frcoin-panel` again, which re-applies the lockdown. Check the leaderboard has a **My Points** button.
 8. Smoke test: **Take Attendance** → Snapshot → Close. Nobody's points change, and the audit channel shows the close.
 9. Lift the freeze. Tell officers that `org_only` is gone from `/snapshot_event` — use an attendance event to record Community Members.
 
