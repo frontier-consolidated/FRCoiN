@@ -44,3 +44,44 @@ def member_has_org_role(member: discord.Member, org_role_ids: list[int]) -> bool
     """Return True if the member holds at least one org role."""
     member_role_ids = {r.id for r in member.roles}
     return bool(member_role_ids & set(org_role_ids))
+
+# ------------------------
+# SLASH COMMAND ACCESS (rollout phase 2 switch)
+# ------------------------
+async def slash_allowed(member: discord.Member) -> bool:
+    """Officer-tier slash commands: officers by default, admins only once `slash_access` is 'admin'. Buttons ignore this."""
+    if await get_config("slash_access") == "admin":
+        return await is_admin(member)
+    return await is_officer(member)
+
+# ------------------------
+# VOICE SCOPE
+# ------------------------
+VOICE_TYPES = (discord.VoiceChannel, discord.StageChannel)
+
+def collect_scope_members(
+    guild: discord.Guild, scope_channel_id: int | None, fallback_member: discord.Member | None
+) -> tuple[list[discord.Member], dict[str, int]] | None:
+    """
+    Everyone (bots excluded) in the event's voice scope, plus a {channel name: count} breakdown.
+    A category covers every voice/stage channel under it, read live so channels created mid-event are included.
+    With no stored scope, falls back to the clicking officer's current voice channel (v1 behaviour).
+    Returns None if there's nothing to snapshot (scope deleted, or no scope and the officer isn't in voice).
+    """
+    scope = guild.get_channel(scope_channel_id) if scope_channel_id else None
+    if isinstance(scope, discord.CategoryChannel):
+        channels = [c for c in scope.channels if isinstance(c, VOICE_TYPES)]
+    elif isinstance(scope, VOICE_TYPES):
+        channels = [scope]
+    elif scope_channel_id is None and fallback_member and fallback_member.voice and isinstance(fallback_member.voice.channel, VOICE_TYPES):
+        channels = [fallback_member.voice.channel]
+    else:
+        return None
+
+    members: list[discord.Member] = []
+    breakdown: dict[str, int] = {}
+    for channel in channels:
+        humans = [m for m in channel.members if not m.bot]
+        breakdown[channel.name] = len(humans)
+        members.extend(humans)
+    return members, breakdown

@@ -30,12 +30,13 @@ class EventsBrowserView(discord.ui.View):
         )
         page_events = self._current_page_events()
         for ev in page_events:
-            status = "Ended" if ev["ended"] else "Active / Cancelled"
+            status = "Ended" if ev["ended"] else "Open"
+            kind = "Attendance" if ev["kind"] == "attendance" else "DKP"
             dkp_str = f"{ev['dkp_awarded']} DKP" if ev["dkp_awarded"] is not None else "—"
             ts = ev["created_at"].strftime("%Y-%m-%d %H:%M UTC") if ev["created_at"] else "Unknown"
             embed.add_field(
                 name=f"`ID {ev['id']}` — {ev['name']}",
-                value=f"{status} • Awarded: {dkp_str} • {ts}",
+                value=f"{kind} • {status} • Awarded: {dkp_str} • {ts}",
                 inline=False
             )
         embed.set_footer(text=f"Page {self.page + 1}/{self.total_pages} • {len(self.events)} total events • FRCoiN")

@@ -19,6 +19,7 @@ build-backend = "setuptools.build_meta"
 packages = ["views", "modals"]
 # Top-level single-file modules to install (names without .py extension)
 py-modules = [
+    "actions",
     "audit_logs",
     "db",
     "events",
@@ -26,5 +27,6 @@ py-modules = [
     "helpers",
     "leaderboard",
     "logger",
-    "main"
+    "main",
+    "panel"
 ]

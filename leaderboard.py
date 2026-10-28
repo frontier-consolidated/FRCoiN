@@ -7,6 +7,7 @@ import discord
 from discord.ext import commands
 from db import get_config, set_config, get_all_users
 from logger import logger
+from views.leaderboard_view import LeaderboardView
 
 async def update_leaderboard(bot: commands.Bot):
     channel_id = await get_config("leaderboard_channel")
@@ -50,10 +51,10 @@ async def update_leaderboard(bot: commands.Bot):
     if message_id:
         try:
             message = await channel.fetch_message(int(message_id))
-            await message.edit(content=None, embed=embed)
+            await message.edit(content=None, embed=embed, view=LeaderboardView())
             return
         except (discord.NotFound, discord.HTTPException) as e:
             logger.warning("Could not edit leaderboard message: %s", e)
 
-    message = await channel.send(embed=embed)
+    message = await channel.send(embed=embed, view=LeaderboardView())
     await set_config("leaderboard_message", message.id)

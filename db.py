@@ -77,6 +77,20 @@ async def init_db():
         await conn.execute("""
             ALTER TABLE events ADD COLUMN IF NOT EXISTS dkp_awarded INTEGER
         """)
+        # V2 migration: panel state. Additive only, so v1 still runs against a migrated DB.
+        await conn.execute("""
+            ALTER TABLE events
+                ADD COLUMN IF NOT EXISTS state                   TEXT NOT NULL DEFAULT 'open',
+                ADD COLUMN IF NOT EXISTS kind                    TEXT NOT NULL DEFAULT 'dkp',
+                ADD COLUMN IF NOT EXISTS created_by_id           BIGINT,
+                ADD COLUMN IF NOT EXISTS scope_channel_id        BIGINT,
+                ADD COLUMN IF NOT EXISTS pending_points          INTEGER,
+                ADD COLUMN IF NOT EXISTS card_channel_id         BIGINT,
+                ADD COLUMN IF NOT EXISTS card_message_id         BIGINT,
+                ADD COLUMN IF NOT EXISTS last_snapshot_at        TIMESTAMPTZ,
+                ADD COLUMN IF NOT EXISTS last_snapshot_breakdown JSONB
+        """)
+        await conn.execute("UPDATE events SET state = 'closed' WHERE ended AND state <> 'closed'")
 
     logger.info("Database initialised.")
 

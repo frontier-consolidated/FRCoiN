@@ -2,6 +2,29 @@
 
 All notable changes to FRCoiN are documented here.
 
+## V2 — button panel (unreleased demo, pending Board approval)
+
+**DB schema:** changes, additive only. New columns on `events` and new config keys, applied automatically on first start. `users`, `dkp_log` and `attendance` are untouched, so balances and history carry over. v1 still runs against a migrated DB (rollback = redeploy v1). **Pre-upgrade export:** optional — see `SETUP.md`.
+
+### Added
+
+- **Button panel** in one Officers+-only channel (`/setup panel_channel:#…`): a lobby message plus one live card per open event. The bot locks the channel to admin/officer roles (needs **Manage Roles**); `/status` warns if it isn't locked down.
+- **Several events can be open at once.** Slash commands gain an optional `event` option with autocomplete; with one open event it's picked automatically.
+- **Multi-channel snapshots.** An event's voice scope can be a whole category — one click captures every voice channel in it, the officer doesn't need to be in voice, and channels created mid-event are included. The card shows a per-channel breakdown, who is new and who has left voice. Snapshots are additive.
+- **Attendance-only events** (`/start_event type:Attendance only` or **Take Attendance**): capture everyone in scope, tagged Member / Community Member in the card and export. No DKP.
+- **Points are awarded on Close.** On a card, End event stores pending points (Edit points / Reopen are available); Close awards them in one DB transaction, DMs the event's creator the summary and deletes the card. Double clicks can't award twice.
+- `/adjustment_mode` (Spend, Add/Remove points) and `/admin_mode` (Setup pickers, Status, Saved events, exports, Delete event, Import leaderboard, Re-post panel, slash-command access toggle) — ephemeral panels, also on the lobby.
+- **My Points** button under the leaderboard: your balance, rank, last 3 entries and full history, visible only to you.
+- `slash_access` setting (`/setup` or the Admin panel): switch officer slash commands to admin-only once officers use the panel. Off by default.
+- Event exports gain a Member / Community Member column and an Event Type row.
+
+### Changed
+
+- **Only org members can gain DKP.** DKP snapshots always capture org members only, Add member refuses non-members, Close skips anyone who lost their org role (listed in the summary), and positive adjustments to non-members are refused. Negative adjustments and `/spend` still work on anyone.
+- `/snapshot_event` no longer has the `org_only` option — the event type decides who is captured. Use an attendance event to record Community Members.
+- `/end_event` still awards immediately, and now also removes the event's card and DMs its creator.
+- The panel and every card are restored on startup, so they keep working across restarts and deploys.
+
 ## 2026-10-26
 
 ### Changed

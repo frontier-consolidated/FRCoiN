@@ -1,1 +1,1 @@
-./.venv/Scripts/python -m main
+./.venv/bin/python -m main

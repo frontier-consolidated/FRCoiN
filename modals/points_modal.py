@@ -1,25 +1,28 @@
 from typing import Union
 import discord
 from discord.ext import commands
-from db import add_dkp
-from audit_logs import audit_embed, send_audit
-from events import active_events, get_event_attendees, end_event
-from leaderboard import update_leaderboard
+import actions
 from logger import logger
+from views.common import guild_member, reply, run_action
 
 class PointsModal(discord.ui.Modal, title="Enter DKP Points"):
+    """
+    Event mode (event_id set): pending=True stores the points on the event (card's End event / Edit points),
+    pending=False awards immediately (/end_event). Adjust mode (target_user set): a manual ± with a reason.
+    """
     points = discord.ui.TextInput(label="Points (+ or -)", placeholder="e.g. 5 or -3")
 
-    def __init__(self, bot: commands.Bot, event_mode=True, target_user: Union[discord.Member, None] = None,
-                 guild_id: Union[int, None] = None, issued_by: Union[discord.Member, None] = None):
+    def __init__(self, bot: commands.Bot, event_id: Union[int, None] = None, pending: bool = False,
+                 target_user: Union[discord.Member, None] = None, default: Union[int, None] = None):
         super().__init__()
         self.bot = bot
-        self.event_mode = event_mode
+        self.event_id = event_id
+        self.pending = pending
         self.target_user = target_user
-        self.guild_id = guild_id
-        self.issued_by = issued_by
+        if default is not None:
+            self.points.default = str(default)
 
-        if not self.event_mode:
+        if self.target_user:
             self.reason = discord.ui.TextInput(
                 label="Reason",
                 placeholder="e.g. Correcting missed attendance",
@@ -38,66 +41,29 @@ class PointsModal(discord.ui.Modal, title="Enter DKP Points"):
             )
             return
 
-        guild_id = interaction.guild_id
-        if not guild_id or not interaction.guild:
+        ctx = guild_member(interaction)
+        if not ctx:
             await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
             return
+        guild, actor = ctx
 
-        issued_by_id = interaction.user.id
-
-        if self.event_mode:
-            active_event = active_events.get(guild_id)
-            if not active_event:
-                await interaction.response.send_message("No active event.", ephemeral=True)
-                return
-
-            attendees = await get_event_attendees(active_event)
-
-            if not attendees:
-                await interaction.response.send_message(
-                    "No attendees recorded for this event. Use `/snapshot_event` first.", ephemeral=True
-                )
-                return
-
-            for row in attendees:
-                await add_dkp(row["user_id"], value, guild_id=guild_id,
-                               reason=f"event:{active_event}", issued_by_id=issued_by_id)
-
-            # Mark the event as ended and record the DKP awarded
-            await end_event(active_event, value)
-
-            await update_leaderboard(self.bot)
-            active_events.pop(guild_id, None)
-
-            await interaction.response.send_message(
-                f"Awarded **{value} DKP** to **{len(attendees)} users**.", ephemeral=True
-            )
-
-            embed = audit_embed("Event DKP Awarded", discord.Colour.green())
-            embed.add_field(name="Event ID", value=str(active_event), inline=True)
-            embed.add_field(name="Points", value=f"{value:+}", inline=True)
-            embed.add_field(name="Recipients", value=str(len(attendees)), inline=True)
-            embed.add_field(name="Issued By", value=interaction.user.mention, inline=False)
-            await send_audit(interaction.guild, embed)
-
+        if self.event_id is not None:
+            event_id = self.event_id
+            if self.pending:
+                message = await run_action(interaction, lambda: actions.set_points_pending(self.bot, guild, actor, event_id, value))
+            else:
+                message = await run_action(interaction, lambda: actions.close_event(self.bot, guild, actor, event_id, value))
         elif self.target_user:
-            reason_text = self.reason.value.strip()
-            await add_dkp(self.target_user.id, value, guild_id=guild_id,
-                           reason=f"manual_adjust: {reason_text}", issued_by_id=issued_by_id)
-            await update_leaderboard(self.bot)
-            await interaction.response.send_message(
-                f"Updated **{self.target_user.display_name}** by **{value:+} DKP**.", ephemeral=True
-            )
+            target, reason = self.target_user, self.reason.value.strip()
+            message = await run_action(interaction, lambda: actions.adjust(self.bot, guild, actor, target, value, reason))
+        else:
+            return
 
-            embed = audit_embed("DKP Manually Adjusted", discord.Colour.orange())
-            embed.add_field(name="Member", value=self.target_user.mention, inline=True)
-            embed.add_field(name="Adjustment", value=f"{value:+}", inline=True)
-            embed.add_field(name="Reason", value=reason_text, inline=False)
-            embed.add_field(name="Issued By", value=interaction.user.mention, inline=False)
-            await send_audit(interaction.guild, embed)
+        if message:
+            await reply(interaction, message)
 
     async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
-        logger.error("Unhandled error in PointsModal (event_mode=%s): %s", self.event_mode, error, exc_info=error)
+        logger.error("Unhandled error in PointsModal (event_id=%s): %s", self.event_id, error, exc_info=error)
         message = "Something went wrong processing that submission. The issue has been logged."
         try:
             if interaction.response.is_done():

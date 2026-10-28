@@ -4,36 +4,49 @@ Frontier Consolidated "DKP" Bot
 
 ## Setup
 
-1. Create python virtual environment: `python -m venv .venv`
-2. Install dependencies: `./.venv/Scripts/pip install .`
-3. Copy `.env.example` to `.env` and fill in your bot token and database connection url
-4. Run the bot: `./.venv/Scripts/python main.py`
+See **[SETUP.md](SETUP.md)** for running the bot, the Discord invite and permissions, first-run server configuration, and upgrading from v1.
+
+Quick start: `python -m venv .venv`, `.venv/bin/pip install .`, copy `.env.example` to `.env` and fill it in, then `.venv/bin/python -m main` (on Windows use `.venv\Scripts\…`).
+
+## The panel
+
+Officers run everything from buttons in one **Officers+-only panel channel** (`/setup panel_channel:#…`). Regular members never see it — the bot locks the channel down for you.
+
+- **Lobby** — *Create Event* (DKP), *Take Attendance* (no DKP), *Adjustments*, *Admin*, and a dropdown that brings any open event's card back to the bottom.
+- **Event cards** — one per open event; any officer can operate any card: *Snapshot / Update snapshot*, *Add / Remove member*, *Attendance*, *Export list*, *End event → Close event*, *Cancel*. Cards keep working for hours and across bot restarts.
+- **Multi-channel snapshots** — give an event a category as its scope and one click captures every voice channel in it, without being in voice yourself. The card shows the per-channel breakdown, who's new, and who has left voice.
+- **Only org members can earn DKP.** Everyone else is a *Community Member*: recorded by attendance events, never awarded DKP.
+- **My Points** — a button under the leaderboard that shows anyone their own balance, rank and history, privately.
 
 ## Features
 
-- Event-based DKP: start/snapshot/end/cancel events, with voice-channel attendance capture and manual add/remove.
-- `/snapshot_event` only captures members holding a configured org role by default — pass `org_only:False` to include non-org guests for open/alliance events.
-- Manual DKP adjustment (`/adjust`) and spend-down (`/spend`, with an optional partial amount), both with a required reason — every change is written to the `dkp_log` table and the audit channel.
-- Self-service `/dkp` and `/dkp_log` so members can check their own balance/history (paginated); officers and org-role holders can look up others.
+- Event-based DKP: start/snapshot/end/cancel events, with voice attendance capture across a whole category and manual add/remove. Several events can be open at once.
+- DKP is awarded on Close, in one database transaction — double clicks can't award twice. The event's creator is DM'd the summary.
+- Attendance-only events record everyone in voice, tagged Member / Community Member.
+- Manual DKP adjustment and spend-down, both with a required reason — every change is written to the `dkp_log` table and the audit channel.
+- Self-service balance and history via the leaderboard's **My Points** button, `/dkp` and `/dkp_log`.
 - Full leaderboard export/import via `.xlsx`, with an automatic pre-import backup posted to the audit channel — the import aborts if the backup can't be sent.
-- Two-tier permissions: **Admin** (full control, via `admin_roles`) and **Officer** (day-to-day event/adjustment operations, via `officer_roles`, optional) — see the command table below.
-- A global error handler logs unhandled command/modal errors and replies with a friendly message instead of a silent failure.
+- Two-tier permissions: **Admin** (`admin_roles`) and **Officer** (`officer_roles`, optional).
+- A global error handler logs unhandled errors and replies with a friendly message instead of a silent failure.
 
 ## Commands
 
 | Command | Tier | Notes |
 |---|---|---|
-| `/setup` | Admin | Config: leaderboard/audit channels, admin/officer/org roles — every option is independent, only the ones you pass are changed |
-| `/start_event`, `/snapshot_event`, `/end_event`, `/cancel_event` | Officer+ | Event lifecycle |
-| `/event_add`, `/event_remove`, `/event_attendance` | Officer+ | Manual attendance editing |
+| `/setup` | Admin | Config: leaderboard/audit/panel channels, admin/officer/org roles, slash-command access — only the options you pass are changed |
+| `/adjustment_mode` | Officer+ | Opens the Adjustments panel (Spend, Add/Remove points) |
+| `/admin_mode` | Admin | Opens the Admin panel (Setup pickers, Status, exports, imports, saved events) |
+| `/start_event` | Officer+ | Optional `type` (DKP / Attendance only) and `scope` (category or voice channel) |
+| `/snapshot_event`, `/end_event`, `/cancel_event` | Officer+ | Event lifecycle. Optional `event` when several are open |
+| `/event_add`, `/event_remove`, `/event_attendance` | Officer+ | Manual attendance editing. Optional `event` |
 | `/events_saved`, `/event_export` | Officer+ | Browse/export past events |
 | `/event_delete` | Admin | Permanently delete a saved event |
-| `/adjust` | Officer+ | Manual DKP +/- with required reason |
+| `/adjust` | Officer+ | Manual DKP +/- with required reason (positive amounts: org members only) |
 | `/spend` | Officer+ | Deduct DKP (optional amount, or reset to 0), required reason |
 | `/export_leaderboard`, `/import_leaderboard` | Admin | Full leaderboard backup/restore (auto-backs-up before import) |
-| `/dkp`, `/dkp_log` | Everyone (self) / Officer+ or org role (others) | Self-service balance + paginated history |
-| `/status` | Officer+ | Current config dump |
+| `/dkp`, `/dkp_log` | Everyone (self) / Officer+ or org role (others) | Balance + paginated history |
+| `/status` | Officer+ | Config, open events, and panel lockdown check |
 
-"Officer+" means the command works for anyone holding an `officer_roles` role, or any admin. If `officer_roles` is left unset via `/setup`, only admins can run those commands.
+"Officer+" means the command works for anyone holding an `officer_roles` role, or any admin. If `officer_roles` is left unset, only admins can run those commands.
 
-`/setup` updates only the options you pass — leave the rest blank to keep their current values. Pass `none` for `org_roles`/`officer_roles` to explicitly clear them.
+Once officers are comfortable with the panel, admins can set `/setup slash_access:Admin-only` (or use the Admin panel toggle): officer-tier slash commands then become admin-only, officers get pointed to the panel, and members to **My Points**. It's instant and reversible.
