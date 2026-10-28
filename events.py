@@ -20,7 +20,7 @@ def event_lock(event_id: int) -> asyncio.Lock:
 
 EVENT_COLUMNS = """
     id, name, guild_id, created_at, ended, dkp_awarded, state, kind, created_by_id,
-    scope_channel_id, pending_points, card_channel_id, card_message_id,
+    scope_channel_ids, pending_points, card_channel_id, card_message_id,
     last_snapshot_at, last_snapshot_breakdown
 """
 
@@ -77,13 +77,13 @@ async def get_event_in_guild(event_id: int, guild_id: int):
     return _decode(row)
 
 async def create_event(guild_id: int, name: str, kind: str = "dkp",
-                       created_by_id: Union[int, None] = None, scope_channel_id: Union[int, None] = None) -> dict:
+                       created_by_id: Union[int, None] = None, scope_channel_ids: Union[list[int], None] = None) -> dict:
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            f"""INSERT INTO events (name, guild_id, kind, created_by_id, scope_channel_id)
+            f"""INSERT INTO events (name, guild_id, kind, created_by_id, scope_channel_ids)
                 VALUES ($1, $2, $3, $4, $5) RETURNING {EVENT_COLUMNS}""",
-            name, guild_id, kind, created_by_id, scope_channel_id
+            name, guild_id, kind, created_by_id, scope_channel_ids or None
         )
 
     return _decode(row)

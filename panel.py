@@ -103,7 +103,7 @@ async def render_card(guild: discord.Guild, event: dict) -> tuple[discord.Embed,
         f"**ID** `{event['id']}` · Created {discord.utils.format_dt(event['created_at'], 'D')}",
         f"Started {discord.utils.format_dt(event['created_at'], 'R')}"
         + (f" by <@{event['created_by_id']}>" if event["created_by_id"] else ""),
-        f"**Scope:** {scope_label(guild, event['scope_channel_id'])}",
+        f"**Scope:** {scope_label(guild, event['scope_channel_ids'])}",
         f"**Last snapshot:** {discord.utils.format_dt(event['last_snapshot_at'], 'R')}" if event["last_snapshot_at"] else "**Last snapshot:** *none yet*",
     ]
     embed = discord.Embed(title=title, description="\n".join(lines), colour=CARD_COLOURS.get((kind, state), discord.Colour.teal()))

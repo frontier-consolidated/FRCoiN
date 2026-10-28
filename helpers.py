@@ -59,21 +59,34 @@ async def slash_allowed(member: discord.Member) -> bool:
 # ------------------------
 VOICE_TYPES = (discord.VoiceChannel, discord.StageChannel)
 
+def scope_voice_channels(guild: discord.Guild, scope_channel_ids: list[int] | None) -> list[discord.VoiceChannel | discord.StageChannel]:
+    """
+    The voice/stage channels an event's scope covers. Each stored id is a voice channel or a category;
+    a category covers every voice/stage channel under it, read live so channels created mid-event are included.
+    Deleted channels are skipped, and a channel picked both directly and via its category is counted once.
+    """
+    channels: dict[int, discord.VoiceChannel | discord.StageChannel] = {}
+    for channel_id in scope_channel_ids or []:
+        scope = guild.get_channel(channel_id)
+        if isinstance(scope, discord.CategoryChannel):
+            channels.update((c.id, c) for c in scope.channels if isinstance(c, VOICE_TYPES))
+        elif isinstance(scope, VOICE_TYPES):
+            channels[scope.id] = scope
+    return list(channels.values())
+
 def collect_scope_members(
-    guild: discord.Guild, scope_channel_id: int | None, fallback_member: discord.Member | None
+    guild: discord.Guild, scope_channel_ids: list[int] | None, fallback_member: discord.Member | None
 ) -> tuple[list[discord.Member], dict[str, int]] | None:
     """
     Everyone (bots excluded) in the event's voice scope, plus a {channel name: count} breakdown.
-    A category covers every voice/stage channel under it, read live so channels created mid-event are included.
     With no stored scope, falls back to the clicking officer's current voice channel (v1 behaviour).
     Returns None if there's nothing to snapshot (scope deleted, or no scope and the officer isn't in voice).
     """
-    scope = guild.get_channel(scope_channel_id) if scope_channel_id else None
-    if isinstance(scope, discord.CategoryChannel):
-        channels = [c for c in scope.channels if isinstance(c, VOICE_TYPES)]
-    elif isinstance(scope, VOICE_TYPES):
-        channels = [scope]
-    elif scope_channel_id is None and fallback_member and fallback_member.voice and isinstance(fallback_member.voice.channel, VOICE_TYPES):
+    if scope_channel_ids:
+        channels = scope_voice_channels(guild, scope_channel_ids)
+        if not channels and not any(guild.get_channel(i) for i in scope_channel_ids):
+            return None
+    elif fallback_member and fallback_member.voice and isinstance(fallback_member.voice.channel, VOICE_TYPES):
         channels = [fallback_member.voice.channel]
     else:
         return None

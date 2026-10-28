@@ -14,7 +14,7 @@ Officers run everything from buttons in one **Officers+-only panel channel** (`/
 
 - **Lobby** — *Create Event* (DKP), *Take Attendance* (no DKP), *Adjustments*, *Admin*, and a dropdown that brings any open event's card back to the bottom.
 - **Event cards** — one per open event; any officer can operate any card: *Snapshot / Update snapshot*, *Add / Remove member*, *Attendance*, *Export list*, *End event → Close event*, *Cancel*. Cards keep working for hours and across bot restarts.
-- **Multi-channel snapshots** — give an event a category as its scope and one click captures every voice channel in it, without being in voice yourself. The card shows the per-channel breakdown, who's new, and who has left voice.
+- **Multi-channel snapshots** — give an event one or more voice channels, or a whole category, as its scope and one click captures them all, without being in voice yourself. Two events can share a category by each picking their own channels; you're warned if their scopes overlap. The card shows the per-channel breakdown, who's new, and who has left voice.
 - **Only org members can earn DKP.** Everyone else is a *Community Member*: recorded by attendance events, never awarded DKP.
 - **My Points** — a button under the leaderboard that shows anyone their own balance, rank and history, privately.
 
@@ -36,7 +36,7 @@ Officers run everything from buttons in one **Officers+-only panel channel** (`/
 | `/setup` | Admin | Config: leaderboard/audit/panel channels, admin/officer/org roles, slash-command access — only the options you pass are changed |
 | `/adjustment_mode` | Officer+ | Opens the Adjustments panel (Spend, Add/Remove points) |
 | `/admin_mode` | Admin | Opens the Admin panel (Setup pickers, Status, exports, imports, saved events) |
-| `/start_event` | Officer+ | Optional `type` (DKP / Attendance only) and `scope` (category or voice channel) |
+| `/start_event` | Officer+ | Optional `type` (DKP / Attendance only) and `scope` (category or voice channel; pick several via the panel's Create Event) |
 | `/snapshot_event`, `/end_event`, `/cancel_event` | Officer+ | Event lifecycle. Optional `event` when several are open |
 | `/event_add`, `/event_remove`, `/event_attendance` | Officer+ | Manual attendance editing. Optional `event` |
 | `/events_saved`, `/event_export` | Officer+ | Browse/export past events |

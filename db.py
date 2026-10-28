@@ -83,12 +83,23 @@ async def init_db():
                 ADD COLUMN IF NOT EXISTS state                   TEXT NOT NULL DEFAULT 'open',
                 ADD COLUMN IF NOT EXISTS kind                    TEXT NOT NULL DEFAULT 'dkp',
                 ADD COLUMN IF NOT EXISTS created_by_id           BIGINT,
-                ADD COLUMN IF NOT EXISTS scope_channel_id        BIGINT,
+                ADD COLUMN IF NOT EXISTS scope_channel_ids       BIGINT[],
                 ADD COLUMN IF NOT EXISTS pending_points          INTEGER,
                 ADD COLUMN IF NOT EXISTS card_channel_id         BIGINT,
                 ADD COLUMN IF NOT EXISTS card_message_id         BIGINT,
                 ADD COLUMN IF NOT EXISTS last_snapshot_at        TIMESTAMPTZ,
                 ADD COLUMN IF NOT EXISTS last_snapshot_breakdown JSONB
+        """)
+        # Pre-release demo builds stored a single scope_channel_id; fold it into the list. No-op on v1 databases.
+        await conn.execute("""
+            DO $$ BEGIN
+                IF EXISTS (SELECT 1 FROM information_schema.columns
+                           WHERE table_name = 'events' AND column_name = 'scope_channel_id') THEN
+                    UPDATE events SET scope_channel_ids = ARRAY[scope_channel_id]
+                        WHERE scope_channel_id IS NOT NULL AND scope_channel_ids IS NULL;
+                    ALTER TABLE events DROP COLUMN scope_channel_id;
+                END IF;
+            END $$
         """)
         await conn.execute("UPDATE events SET state = 'closed' WHERE ended AND state <> 'closed'")
 

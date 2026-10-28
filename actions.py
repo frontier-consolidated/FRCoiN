@@ -21,7 +21,7 @@ from events import (
     set_event_state, take_event_attendance,
 )
 from export import build_dkp_xlsx, build_event_xlsx
-from helpers import collect_scope_members, get_org_role_ids, is_admin, is_officer, member_has_org_role
+from helpers import collect_scope_members, get_org_role_ids, is_admin, is_officer, member_has_org_role, scope_voice_channels
 from leaderboard import update_leaderboard
 from logger import logger
 
@@ -52,15 +52,19 @@ def display_name(guild: discord.Guild, user_id: int) -> str:
     member = guild.get_member(user_id)
     return member.display_name if member else f"Unknown ({user_id})"
 
-def scope_label(guild: discord.Guild, scope_channel_id: Union[int, None]) -> str:
-    if not scope_channel_id:
+def scope_label(guild: discord.Guild, scope_channel_ids: Union[list[int], None]) -> str:
+    if not scope_channel_ids:
         return "Officer's current voice channel"
-    channel = guild.get_channel(scope_channel_id)
-    if isinstance(channel, discord.CategoryChannel):
-        return f"{channel.name} (category — every voice channel in it)"
-    if channel:
-        return channel.mention
-    return f"Deleted channel ({scope_channel_id})"
+    labels = []
+    for channel_id in scope_channel_ids:
+        channel = guild.get_channel(channel_id)
+        if isinstance(channel, discord.CategoryChannel):
+            labels.append(f"{channel.name} (category — every voice channel in it)")
+        elif channel:
+            labels.append(channel.mention)
+        else:
+            labels.append(f"Deleted channel ({channel_id})")
+    return ", ".join(labels)
 
 # ------------------------
 # EVENT LOOKUP
@@ -88,26 +92,41 @@ async def resolve_event(guild: discord.Guild, event_id: Union[int, None]) -> dic
 # EVENT LIFECYCLE
 # ------------------------
 async def start_event(bot: commands.Bot, guild: discord.Guild, actor: discord.Member, name: str,
-                      kind: str = "dkp", scope: Union[discord.abc.GuildChannel, None] = None) -> dict:
+                      kind: str = "dkp", scope: Union[list[discord.abc.GuildChannel], None] = None) -> tuple[dict, str]:
+    """Returns the new event and a warning (empty if none) naming other open events whose scope shares channels with it."""
     await require_officer(actor)
     if kind == "dkp" and not await get_org_role_ids():
         raise ActionError(NO_ORG_ROLES)
-    if scope is not None and not isinstance(scope, (discord.CategoryChannel, discord.VoiceChannel, discord.StageChannel)):
-        raise ActionError("The scope must be a category or a voice channel.")
+    if any(not isinstance(c, (discord.CategoryChannel, discord.VoiceChannel, discord.StageChannel)) for c in scope or []):
+        raise ActionError("The scope must be categories or voice channels.")
+    scope_ids = list(dict.fromkeys(c.id for c in scope or []))
 
-    event = await create_event(guild.id, name, kind, actor.id, scope.id if scope else None)
+    # Someone in a shared channel would be captured by both events, so tell the officer up front.
+    overlap_warning = ""
+    if scope_ids:
+        new_channels = {c.id for c in scope_voice_channels(guild, scope_ids)}
+        shared = []
+        for other in await get_open_events(guild.id):
+            common = new_channels & {c.id for c in scope_voice_channels(guild, other["scope_channel_ids"])}
+            if common:
+                shared.append(f"**{other['name']}** ({', '.join(f'<#{i}>' for i in common)})")
+        if shared:
+            overlap_warning = ("⚠️ This event shares voice channels with " + "; ".join(shared)
+                               + ". Anyone in a shared channel will be captured by more than one event.")
+
+    event = await create_event(guild.id, name, kind, actor.id, scope_ids)
 
     embed = audit_embed("Event Started", discord.Colour.teal())
     embed.add_field(name="Event", value=name, inline=True)
     embed.add_field(name="Event ID", value=str(event["id"]), inline=True)
     embed.add_field(name="Type", value=KIND_LABELS[kind], inline=True)
-    embed.add_field(name="Scope", value=scope_label(guild, event["scope_channel_id"]), inline=False)
+    embed.add_field(name="Scope", value=scope_label(guild, event["scope_channel_ids"]), inline=False)
     embed.add_field(name="Started By", value=actor.mention, inline=False)
     await send_audit(guild, embed)
 
     await panel.upsert_card(bot, guild, event["id"])
     await panel.refresh_lobby(bot, guild)
-    return event
+    return event, overlap_warning
 
 async def snapshot_event(bot: commands.Bot, guild: discord.Guild, actor: discord.Member, event_id: int) -> str:
     await require_officer(actor)
@@ -116,9 +135,9 @@ async def snapshot_event(bot: commands.Bot, guild: discord.Guild, actor: discord
         if event["state"] != "open":
             raise ActionError("Points have already been entered for this event — press **Reopen** to snapshot again.")
 
-        collected = collect_scope_members(guild, event["scope_channel_id"], actor)
+        collected = collect_scope_members(guild, event["scope_channel_ids"], actor)
         if collected is None:
-            if event["scope_channel_id"]:
+            if event["scope_channel_ids"]:
                 raise ActionError("This event's voice scope no longer exists. Join a voice channel and use `/snapshot_event`, or start a new event.")
             raise ActionError("This event has no voice scope, so you must be in a voice channel to snapshot.")
         in_voice, breakdown = collected

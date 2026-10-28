@@ -159,7 +159,7 @@ async def setup(
 @app_commands.describe(
     name="Name of the event",
     kind="DKP event (org members only, earns points) or attendance only (everyone, no points)",
-    scope="Category (every voice channel in it) or one voice channel. Blank = your voice channel at each snapshot"
+    scope="Category or voice channel (pick several via the panel). Blank = your voice channel at each snapshot"
 )
 @app_commands.rename(kind="type")
 @app_commands.choices(kind=[
@@ -179,9 +179,10 @@ async def start_event(
     kind_value = kind.value if kind else "dkp"
 
     async def start():
-        event = await actions.start_event(bot, guild, actor, name, kind_value, scope)
+        event, overlap_warning = await actions.start_event(bot, guild, actor, name, kind_value, [scope] if scope else None)
         return (f"Event **{name}** started (ID: `{event['id']}`).\n"
-                f"Use `/snapshot_event` (or the card in the panel) to capture attendees, then `/end_event`.")
+                f"Use `/snapshot_event` (or the card in the panel) to capture attendees, then `/end_event`."
+                + (f"\n{overlap_warning}" if overlap_warning else ""))
 
     await run_and_reply(interaction, start)
 
