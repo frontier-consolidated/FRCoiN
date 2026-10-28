@@ -28,6 +28,8 @@ def _decode(row) -> Union[dict, None]:
     if row is None:
         return None
     event = dict(row)
+    if event["ended"]:  # v1 ends events without knowing about `state`, so `ended` wins
+        event["state"] = "closed"
     breakdown = event.get("last_snapshot_breakdown")
     event["last_snapshot_breakdown"] = json.loads(breakdown) if breakdown else None
     return event
@@ -36,7 +38,7 @@ async def get_open_events(guild_id: int) -> list[dict]:
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            f"SELECT {EVENT_COLUMNS} FROM events WHERE guild_id = $1 AND state = ANY($2::text[]) ORDER BY id DESC",
+            f"SELECT {EVENT_COLUMNS} FROM events WHERE guild_id = $1 AND state = ANY($2::text[]) AND NOT ended ORDER BY id DESC",
             guild_id, list(OPEN_STATES)
         )
     return [_decode(r) for r in rows]
@@ -45,7 +47,7 @@ async def get_all_open_events() -> list[dict]:
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            f"SELECT {EVENT_COLUMNS} FROM events WHERE state = ANY($1::text[]) ORDER BY id",
+            f"SELECT {EVENT_COLUMNS} FROM events WHERE state = ANY($1::text[]) AND NOT ended ORDER BY id",
             list(OPEN_STATES)
         )
     return [_decode(r) for r in rows]
@@ -123,7 +125,7 @@ async def close_attendance_event(event_id: int) -> bool:
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "UPDATE events SET state = 'closed', ended = TRUE, pending_points = NULL WHERE id = $1 AND state <> 'closed' RETURNING id",
+            "UPDATE events SET state = 'closed', ended = TRUE, pending_points = NULL WHERE id = $1 AND state <> 'closed' AND NOT ended RETURNING id",
             event_id
         )
     return row is not None
@@ -138,7 +140,7 @@ async def award_and_close_event(event_id: int, points: int, guild_id: int, issue
         async with conn.transaction():
             row = await conn.fetchrow(
                 """UPDATE events SET state = 'closed', ended = TRUE, dkp_awarded = $1, pending_points = NULL
-                   WHERE id = $2 AND state <> 'closed' RETURNING id""",
+                   WHERE id = $2 AND state <> 'closed' AND NOT ended RETURNING id""",
                 points, event_id
             )
             if row is None:

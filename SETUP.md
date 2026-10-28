@@ -40,12 +40,22 @@
 
 ## 4. Upgrading from v1 to V2
 
-The upgrade is a straight file replacement:
+The upgrade is a straight file replacement. Allow about 10 minutes, at a quiet time between events.
 
-1. Replace the repo's files with the V2 files on `main`, push, and run the **Deploy (prod)** workflow.
-2. On first start the bot migrates the database itself, re-syncs slash commands, and adds the My Points button to the leaderboard. No new environment variables or secrets are needed.
-3. In Discord: give the bot's role **Manage Roles**, then run `/setup panel_channel:#frcoin-panel`.
-4. Tell officers that `org_only` is gone from `/snapshot_event` — use an attendance event to record Community Members.
+**Before:**
+1. Finish or cancel any open event (`/status` shows it). An open v1 event does carry over, but it's simpler not to have one.
+2. Tell officers there's a short freeze: no FRCoiN commands until the panel appears in `#frcoin-panel`. While the deploy swaps the old bot for the new one, both can briefly be online at the same time and answer the same command twice, and any form someone has open in the old bot is lost.
+3. Optional: run `/export_leaderboard` and keep the file (see below).
+
+**Deploy:**
+4. Replace the repo's files with the V2 files on `main`, push, and run the **Deploy (prod)** workflow.
+5. On first start the bot migrates the database itself, re-syncs slash commands, and adds the My Points button to the leaderboard. No new environment variables or secrets are needed.
+
+**After:**
+6. In Discord: give the bot's role **Manage Roles**, then run `/setup panel_channel:#frcoin-panel`. The lobby should appear and the channel should become hidden from regular members.
+7. Run `/status`: it should show no lockdown warning. Check the leaderboard has a **My Points** button.
+8. Smoke test: **Take Attendance** → Snapshot → Close. Nobody's points change, and the audit channel shows the close.
+9. Lift the freeze. Tell officers that `org_only` is gone from `/snapshot_event` — use an attendance event to record Community Members.
 
 **Is a backup required?** No. The schema changes are additive only (new columns on `events`, new config keys). `users`, `dkp_log` and `attendance` are not changed, so balances and history carry over untouched.
 
@@ -54,4 +64,4 @@ The upgrade is a straight file replacement:
 
 Best done **between events**. If a v1 event is open during the upgrade, it becomes an open DKP event and gets a card on startup. It has no stored voice scope, so its snapshots use the officer's current voice channel, like v1.
 
-**Rollback:** redeploy the previous `main` commit. v1 ignores the new columns, so it runs fine against the migrated database.
+**Rollback:** redeploy the previous `main` commit. v1 ignores the new columns, so it runs fine against the migrated database. First close or cancel any open V2 events: v1 can only track one open event, so it would only see the newest. If you later upgrade again, events that v1 ended are recognised as closed, and they're never awarded twice.
