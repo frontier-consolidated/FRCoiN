@@ -118,7 +118,9 @@ async def add_dkp(user_id: int, amount: int, guild_id: Union[int, None] = None, 
                 VALUES ($1, $2, $3, $4, $5)
             """, guild_id, user_id, amount, reason, issued_by_id)
 
-async def set_dkp(user_id: int, amount: int, guild_id: Union[int, None] = None, reason: Union[str, None] = None, issued_by_id: Union[int, None] = None):
+async def set_dkp(user_id: int, amount: int, guild_id: Union[int, None] = None, reason: Union[str, None] = None, issued_by_id: Union[int, None] = None,
+                  log_amount: Union[int, None] = None):
+    """Set a balance. The DKP log records `log_amount` (the change) when given, else the new balance."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("""
@@ -129,7 +131,7 @@ async def set_dkp(user_id: int, amount: int, guild_id: Union[int, None] = None, 
             await conn.execute("""
                 INSERT INTO dkp_log (guild_id, target_user_id, amount, reason, issued_by_id)
                 VALUES ($1, $2, $3, $4, $5)
-            """, guild_id, user_id, amount, reason, issued_by_id)
+            """, guild_id, user_id, amount if log_amount is None else log_amount, reason, issued_by_id)
 
 async def get_all_users():
     pool = await get_pool()

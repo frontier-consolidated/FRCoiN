@@ -341,7 +341,8 @@ async def close_event(bot: commands.Bot, guild: discord.Guild, actor: discord.Me
     await panel.refresh_lobby(bot, guild)
 
     if event["kind"] == "dkp":
-        skipped_note = f" Skipped **{len(skipped_ids)}** who are no longer org members." if skipped_ids else ""
+        skipped_note = (f" Skipped **{len(skipped_ids)}** who {'is no longer an org member' if len(skipped_ids) == 1 else 'are no longer org members'}."
+                        if skipped_ids else "")
         return f"Awarded **{points:+} DKP** to **{len(attendee_ids) - len(skipped_ids)} users** for **{event['name']}**.{skipped_note}"
     return f"**{event['name']}** closed with **{len(attendee_ids)}** attendees recorded."
 
@@ -415,7 +416,7 @@ async def spend(bot: commands.Bot, guild: discord.Guild, actor: discord.Member, 
     if amount is not None and amount > current:
         clamped_note = f" (requested {amount}, but **{member.display_name}** only had {current} — balance reset to 0)"
 
-    await set_dkp(member.id, new_balance, guild_id=guild.id, reason=reason, issued_by_id=actor.id)
+    await set_dkp(member.id, new_balance, guild_id=guild.id, reason=reason, issued_by_id=actor.id, log_amount=-deducted)
     await update_leaderboard(bot)
 
     embed = audit_embed("DKP Spent", discord.Colour.red())
