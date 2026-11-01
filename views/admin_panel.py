@@ -1,4 +1,4 @@
-from typing import Callable, Union
+from typing import Callable, Union, cast
 import discord
 from discord.ext import commands
 
@@ -29,7 +29,7 @@ class AdminPanel(ExpiringPanel):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if not await super().interaction_check(interaction):
             return False
-        if not await is_admin(interaction.user):  # re-checked: roles may have changed since the panel opened
+        if not await is_admin(cast(discord.Member, interaction.user)):  # re-checked: roles may have changed since the panel opened
             await interaction.response.send_message(actions.NO_PERMISSION, ephemeral=True)
             return False
         return True
@@ -264,7 +264,7 @@ class SetupRolesModal(discord.ui.Modal, title="Setup: Roles"):
         for key, text, description in cls.FIELDS:
             current = [r for r in (guild.get_role(i) for i in _current_ids(await get_config(key)))] if guild else []
             select = discord.ui.RoleSelect(
-                min_values=0, max_values=25, required=key == "admin_roles",
+                min_values=1 if key == "admin_roles" else 0, max_values=25, required=key == "admin_roles",
                 placeholder="Pick roles", default_values=[r for r in current if r],
             )
             modal.selects[key] = select

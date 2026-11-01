@@ -24,9 +24,7 @@ EVENT_COLUMNS = """
     last_snapshot_at, last_snapshot_breakdown
 """
 
-def _decode(row) -> Union[dict, None]:
-    if row is None:
-        return None
+def _decode(row) -> dict:
     event = dict(row)
     if event["ended"]:  # 1.x ends events without knowing about `state`, so `ended` wins
         event["state"] = "closed"
@@ -67,14 +65,14 @@ async def get_event(event_id: int) -> Union[dict, None]:
     async with pool.acquire() as conn:
         row = await conn.fetchrow(f"SELECT {EVENT_COLUMNS} FROM events WHERE id = $1", event_id)
 
-    return _decode(row)
+    return _decode(row) if row else None
 
 async def get_event_in_guild(event_id: int, guild_id: int):
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(f"SELECT {EVENT_COLUMNS} FROM events WHERE id = $1 AND guild_id = $2", event_id, guild_id)
 
-    return _decode(row)
+    return _decode(row) if row else None
 
 async def create_event(guild_id: int, name: str, kind: str = "dkp",
                        created_by_id: Union[int, None] = None, scope_channel_ids: Union[list[int], None] = None) -> dict:

@@ -1,5 +1,5 @@
 import re
-from typing import cast
+from typing import Any, cast
 import discord
 from discord.ext import commands
 
@@ -36,7 +36,7 @@ class EventCardButton(discord.ui.DynamicItem[discord.ui.Button], template=r"frc:
         self.event_id = event_id
 
     @classmethod
-    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match[str]):
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Item[Any], match: re.Match[str]):
         return cls(match["action"], int(match["event_id"]))
 
     async def callback(self, interaction: discord.Interaction):

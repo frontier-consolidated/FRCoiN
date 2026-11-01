@@ -168,7 +168,7 @@ async def setup(
 ])
 async def start_event(
     interaction: discord.Interaction,
-    name: str,
+    name: app_commands.Range[str, 1, 100],
     kind: app_commands.Choice[str] | None = None,
     scope: discord.CategoryChannel | discord.VoiceChannel | discord.StageChannel | None = None
 ):

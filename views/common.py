@@ -7,10 +7,12 @@ GENERIC_ERROR = "Something went wrong processing that. The issue has been logged
 async def reply(interaction: discord.Interaction, content: Union[str, None] = None, **kwargs):
     """Ephemeral reply that works whether or not the interaction has already been responded to / deferred."""
     kwargs.setdefault("ephemeral", True)
+    if content is not None:  # followup.send takes no None content; an embed- or file-only reply leaves it out
+        kwargs["content"] = content
     if interaction.response.is_done():
-        await interaction.followup.send(content, **kwargs)
+        await interaction.followup.send(**kwargs)
     else:
-        await interaction.response.send_message(content, **kwargs)
+        await interaction.response.send_message(**kwargs)
 
 async def run_action(interaction: discord.Interaction, action: Callable[[], Awaitable[Any]], defer: bool = True) -> Any:
     """

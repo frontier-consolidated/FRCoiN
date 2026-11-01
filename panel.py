@@ -154,7 +154,11 @@ async def upsert_card(bot: commands.Bot, guild: discord.Guild, event_id: int, re
         else:
             await delete_card(bot, event)
 
-    message = await channel.send(embed=embed, view=view)
+    try:
+        message = await channel.send(embed=embed, view=view)
+    except discord.HTTPException as e:  # e.g. the bot lost Send Messages there; /status reports it
+        logger.warning("Could not post card for event %s: %s", event_id, e)
+        return
     await set_event_card(event_id, channel.id, message.id)
 
 async def delete_card(bot: commands.Bot, event: dict):
@@ -217,7 +221,11 @@ async def refresh_lobby(bot: commands.Bot, guild: discord.Guild):
             logger.warning("Could not edit panel lobby: %s", e)
             return
 
-    message = await channel.send(embed=embed, view=view)
+    try:
+        message = await channel.send(embed=embed, view=view)
+    except discord.HTTPException as e:
+        logger.warning("Could not post panel lobby: %s", e)
+        return
     await set_config("panel_message", message.id)
 
 async def move_panel(bot: commands.Bot, guild: discord.Guild, old_channel_id: Union[str, None]):
