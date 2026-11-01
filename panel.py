@@ -2,10 +2,11 @@
 # PANEL — lobby message, event cards and channel lockdown
 # ------------------------
 
-from typing import Union
+from typing import Awaitable, Callable, Union
 import discord
 from discord.ext import commands
 
+from adjustment_lists import get_all_open_lists, get_lines, get_list, get_open_lists, member_nets, set_list_card
 from db import get_config, set_config
 from events import get_all_open_events, get_event, get_event_attendees, get_open_events, set_event_card
 from helpers import get_org_role_ids, member_has_org_role
@@ -133,6 +134,38 @@ async def render_card(guild: discord.Guild, event: dict) -> tuple[discord.Embed,
     embed.set_footer(text="Any officer can operate this card • FRCoiN")
     return embed, build_card_view(event, has_attendees=bool(attendee_ids))
 
+async def _publish(bot: commands.Bot, channel: discord.TextChannel, record: dict, embed: discord.Embed, view: discord.ui.View,
+                   repost: bool, save: Callable[[Union[int, None], Union[int, None]], Awaitable[None]], what: str):
+    """Edit a card in place, or (re)post it at the bottom of the panel channel and save its new ids."""
+    if record["card_message_id"]:
+        if not repost and record["card_channel_id"] == channel.id:
+            try:
+                await channel.get_partial_message(record["card_message_id"]).edit(embed=embed, view=view)
+                return
+            except discord.NotFound:
+                pass
+            except discord.HTTPException as e:
+                logger.warning("Could not edit card for %s: %s", what, e)
+                return
+        else:
+            await _delete_message(bot, record)
+            await save(None, None)
+
+    try:
+        message = await channel.send(embed=embed, view=view)
+    except discord.HTTPException as e:  # e.g. the bot lost Send Messages there; /status reports it
+        logger.warning("Could not post card for %s: %s", what, e)
+        return
+    await save(channel.id, message.id)
+
+async def _delete_message(bot: commands.Bot, record: dict):
+    channel = bot.get_channel(record["card_channel_id"])
+    if isinstance(channel, discord.TextChannel):
+        try:
+            await channel.get_partial_message(record["card_message_id"]).delete()
+        except discord.HTTPException:
+            pass
+
 async def upsert_card(bot: commands.Bot, guild: discord.Guild, event_id: int, repost: bool = False):
     """Edit the event's card in place, or (re)post it at the bottom of the panel channel."""
     event = await get_event(event_id)
@@ -140,49 +173,77 @@ async def upsert_card(bot: commands.Bot, guild: discord.Guild, event_id: int, re
     if not event or not channel:
         return
     embed, view = await render_card(guild, event)
-
-    if event["card_message_id"]:
-        if not repost and event["card_channel_id"] == channel.id:
-            try:
-                await channel.get_partial_message(event["card_message_id"]).edit(embed=embed, view=view)
-                return
-            except discord.NotFound:
-                pass
-            except discord.HTTPException as e:
-                logger.warning("Could not edit card for event %s: %s", event_id, e)
-                return
-        else:
-            await delete_card(bot, event)
-
-    try:
-        message = await channel.send(embed=embed, view=view)
-    except discord.HTTPException as e:  # e.g. the bot lost Send Messages there; /status reports it
-        logger.warning("Could not post card for event %s: %s", event_id, e)
-        return
-    await set_event_card(event_id, channel.id, message.id)
+    await _publish(bot, channel, event, embed, view, repost, lambda c, m: set_event_card(event_id, c, m), f"event {event_id}")
 
 async def delete_card(bot: commands.Bot, event: dict):
     if not event["card_message_id"]:
         return
-    channel = bot.get_channel(event["card_channel_id"])
-    if isinstance(channel, discord.TextChannel):
-        try:
-            await channel.get_partial_message(event["card_message_id"]).delete()
-        except discord.HTTPException:
-            pass
+    await _delete_message(bot, event)
     await set_event_card(event["id"], None, None)
+
+# ------------------------
+# ADJUSTMENT LIST CARDS
+# ------------------------
+LIST_CARD_LINES = 20
+
+async def render_list_card(guild: discord.Guild, adj_list: dict) -> tuple[discord.Embed, discord.ui.View]:
+    from actions import _skip_lines, list_shortfalls  # actions imports panel, so import lazily
+    from views.adjustment_card import build_list_view
+
+    lines = await get_lines(adj_list["id"])
+    nets = member_nets(lines)
+    head = [
+        f"**ID** `{adj_list['id']}` · Started {discord.utils.format_dt(adj_list['created_at'], 'R')} by <@{adj_list['created_by_id']}>",
+        f"Any officer can add or remove lines. Only <@{adj_list['created_by_id']}> or an admin can apply or cancel.",
+        "",
+    ]
+    rows = [f"`#{l['line_no']}` <@{l['user_id']}> **{l['amount']:+}**" + (f" — {l['reason']}" if l["reason"] else "")
+            for l in lines[:LIST_CARD_LINES]]
+    if len(lines) > LIST_CARD_LINES:
+        rows.append(f"… and {len(lines) - LIST_CARD_LINES} more — **View all**")
+    description = "\n".join(head + (rows or ["*No lines yet — click **Add lines**.*"]))
+    embed = discord.Embed(title=f"🧾 Adjustment list — {adj_list['name']}"[:256], description=description[:4096],
+                          colour=discord.Colour.orange())
+
+    if lines:
+        added = sum(l["amount"] for l in lines if l["amount"] > 0)
+        removed = -sum(l["amount"] for l in lines if l["amount"] < 0)
+        embed.add_field(name="Totals", value=f"**{len(lines)}** lines · **{len(nets)}** members · **-{removed}** / **+{added}** points",
+                        inline=False)
+        short, not_org = await list_shortfalls(guild, lines)
+        problems = _skip_lines(short, not_org)
+        embed.add_field(name="Balance check",
+                        value=("\n".join(f"⚠️ {p}" for p in problems)[:1024] + "\n*They'll be skipped unless fixed before Apply.*")
+                        if problems else "✅ Everyone on the list can cover their lines.", inline=False)
+    embed.set_footer(text="Nothing changes until the list is applied • FRCoiN")
+    return embed, build_list_view(adj_list, has_lines=bool(lines))
+
+async def upsert_list_card(bot: commands.Bot, guild: discord.Guild, list_id: int, repost: bool = False):
+    adj_list = await get_list(list_id)
+    channel = await get_panel_channel(guild)
+    if not adj_list or not channel:
+        return
+    embed, view = await render_list_card(guild, adj_list)
+    await _publish(bot, channel, adj_list, embed, view, repost, lambda c, m: set_list_card(list_id, c, m), f"adjustment list {list_id}")
+
+async def delete_list_card(bot: commands.Bot, adj_list: dict):
+    if not adj_list["card_message_id"]:
+        return
+    await _delete_message(bot, adj_list)
+    await set_list_card(adj_list["id"], None, None)
 
 # ------------------------
 # LOBBY
 # ------------------------
-def lobby_embed(open_events: list[dict]) -> discord.Embed:
+def lobby_embed(open_events: list[dict], open_lists: Union[list[dict], None] = None) -> discord.Embed:
     embed = discord.Embed(
         title="FRCoiN Panel",
         description=(
             "**Create Event** — a DKP event; only org members are captured and earn points.\n"
             "**Take Attendance** — records everyone in voice, members and Community Members. No DKP.\n"
             "Each open event has its own card below. Any officer can operate any card.\n"
-            "Use the dropdown to bring an event's card back to the bottom of the channel."
+            "**Adjustments** — spends and corrections, or an **adjustment list** for many members at once.\n"
+            "Use the dropdown to bring a card back to the bottom of the channel."
         ),
         colour=discord.Colour.blurple()
     )
@@ -199,6 +260,14 @@ def lobby_embed(open_events: list[dict]) -> discord.Embed:
         embed.add_field(name=f"Open events ({len(open_events)})", value="\n".join(lines), inline=False)
     else:
         embed.add_field(name="Open events", value="*None right now.*", inline=False)
+    if open_lists:
+        lines = []
+        for a in open_lists[:10]:
+            link = f"https://discord.com/channels/{a['guild_id']}/{a['card_channel_id']}/{a['card_message_id']}" if a["card_message_id"] else None
+            lines.append(f"`{a['id']}` [ADJ] " + (f"[{a['name']}]({link})" if link else a["name"]))
+        if len(open_lists) > 10:
+            lines.append(f"… and {len(open_lists) - 10} more in the dropdown")
+        embed.add_field(name=f"Open adjustment lists ({len(open_lists)})", value="\n".join(lines), inline=False)
     embed.set_footer(text="Officers+ only • FRCoiN")
     return embed
 
@@ -207,8 +276,8 @@ async def refresh_lobby(bot: commands.Bot, guild: discord.Guild):
     if not channel:
         return
     from views.lobby_view import LobbyView
-    open_events = await get_open_events(guild.id)
-    embed, view = lobby_embed(open_events), LobbyView(bot, open_events)
+    open_events, open_lists = await get_open_events(guild.id), await get_open_lists(guild.id)
+    embed, view = lobby_embed(open_events, open_lists), LobbyView(bot, open_events, open_lists)
 
     message_id = await get_config("panel_message")
     if message_id:
@@ -241,6 +310,8 @@ async def move_panel(bot: commands.Bot, guild: discord.Guild, old_channel_id: Un
     await refresh_lobby(bot, guild)
     for event in await get_open_events(guild.id):
         await upsert_card(bot, guild, event["id"], repost=True)
+    for adj_list in await get_open_lists(guild.id):
+        await upsert_list_card(bot, guild, adj_list["id"], repost=True)
 
 async def restore_panel(bot: commands.Bot):
     """On startup: re-render the lobby and every open card, re-posting any that were deleted by hand."""
@@ -254,5 +325,8 @@ async def restore_panel(bot: commands.Bot):
     for event in await get_all_open_events():
         if event["guild_id"] == channel.guild.id:
             await upsert_card(bot, channel.guild, event["id"])
+    for adj_list in await get_all_open_lists():
+        if adj_list["guild_id"] == channel.guild.id:
+            await upsert_list_card(bot, channel.guild, adj_list["id"])
     await refresh_lobby(bot, channel.guild)
     logger.info("Panel restored in #%s.", channel.name)

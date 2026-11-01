@@ -102,6 +102,37 @@ async def init_db():
             END $$
         """)
         await conn.execute("UPDATE events SET state = 'closed' WHERE ended AND state <> 'closed'")
+        # 2.1.0: adjustment lists. New tables only, so 1.x and 2.0.0 still run against a migrated DB.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS adjustment_lists (
+                id              SERIAL PRIMARY KEY,
+                guild_id        BIGINT      NOT NULL,
+                name            TEXT        NOT NULL,
+                state           TEXT        NOT NULL DEFAULT 'open',
+                created_by_id   BIGINT,
+                created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                closed_by_id    BIGINT,
+                closed_at       TIMESTAMPTZ,
+                card_channel_id BIGINT,
+                card_message_id BIGINT
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS adjustment_lines (
+                id            SERIAL PRIMARY KEY,
+                list_id       INTEGER     NOT NULL REFERENCES adjustment_lists(id) ON DELETE CASCADE,
+                line_no       INTEGER     NOT NULL,
+                user_id       BIGINT      NOT NULL,
+                amount        INTEGER     NOT NULL CHECK (amount <> 0),
+                reason        TEXT,
+                added_by_id   BIGINT,
+                added_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                removed_by_id BIGINT,
+                removed_at    TIMESTAMPTZ,
+                outcome       TEXT,
+                UNIQUE (list_id, line_no)
+            )
+        """)
 
     logger.info("Database initialised.")
 
@@ -152,6 +183,15 @@ async def get_dkp(user_id: int) -> int:
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT dkp FROM users WHERE user_id = $1", user_id)
     return row["dkp"] if row else 0
+
+async def get_balances(user_ids: list[int]) -> dict[int, int]:
+    """Balances for several members in one query; anyone without a row has 0."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT user_id, dkp FROM users WHERE user_id = ANY($1::bigint[])", list(user_ids))
+    balances = {uid: 0 for uid in user_ids}
+    balances.update({r["user_id"]: r["dkp"] for r in rows})
+    return balances
 
 async def get_dkp_log_entries(guild_id: int, user_id: int, limit: int = 500):
     pool = await get_pool()

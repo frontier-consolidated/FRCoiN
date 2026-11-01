@@ -40,7 +40,8 @@ class AdjustPanel(ExpiringPanel):
         embed = discord.Embed(
             title="Adjustments",
             description="**Spend** — deduct DKP a member has spent (blank amount resets them to 0).\n"
-                        "**Add / Remove points** — a manual ± with a reason. Only org members can be given DKP.",
+                        "**Add / Remove points** — a manual ± with a reason. Only org members can be given DKP.\n"
+                        "**New adjustment list** — collect many ± lines (e.g. an Arms Fayre) on a card, then apply them all at once.",
             colour=discord.Colour.orange()
         )
         await reply(interaction, embed=embed, view=view)
@@ -53,6 +54,11 @@ class AdjustPanel(ExpiringPanel):
     @discord.ui.button(label="Add / Remove points", style=discord.ButtonStyle.primary)
     async def adjust_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(AdjustModal(self.bot))
+
+    @discord.ui.button(label="New adjustment list", style=discord.ButtonStyle.success)
+    async def list_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        from modals.adjustment_modals import NewListModal
+        await interaction.response.send_modal(NewListModal(self.bot))
 
 class SpendModal(discord.ui.Modal, title="Spend DKP"):
     def __init__(self, bot: commands.Bot):

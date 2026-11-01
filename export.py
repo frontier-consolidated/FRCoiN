@@ -105,3 +105,50 @@ async def build_dkp_xlsx(bot: commands.Bot, guild: discord.Guild):
     buffer.seek(0)
 
     return buffer, users
+# ------------------------
+# ADJUSTMENT LIST
+# ------------------------
+
+def _when(ts) -> str:
+    return ts.strftime("%Y-%m-%d %H:%M UTC") if ts else ""
+
+def build_adjustment_xlsx(guild: discord.Guild, adj_list: dict, lines: list[dict]) -> io.BytesIO:
+    """Every line of an adjustment list, removed ones included, with who added it and what happened to it."""
+    def name(uid):
+        if not uid:
+            return ""
+        member = guild.get_member(uid)
+        return member.display_name if member else f"Unknown ({uid})"
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    if not ws:
+        raise ValueError("Workbook has no active sheet.")
+    ws.title = "Lines"
+    ws.append(["Line", "Member", "UserID", "Points", "Reason", "Added By", "Added At", "Status", "Removed By"])
+    for line in lines:
+        if line["removed_at"]:
+            status = "Removed"
+        else:
+            status = {"applied": "Applied", "skipped": "Skipped"}.get(line["outcome"] or "", "Pending")
+        ws.append([line["line_no"], name(line["user_id"]), str(line["user_id"]), line["amount"], line["reason"] or "",
+                   name(line["added_by_id"]), _when(line["added_at"]), status, name(line["removed_by_id"])])
+
+    active = [line for line in lines if not line["removed_at"]]
+    ws2 = wb.create_sheet("Summary")
+    ws2.append(["List ID", adj_list["id"]])
+    ws2.append(["Name", adj_list["name"]])
+    ws2.append(["State", adj_list["state"].capitalize()])
+    ws2.append(["Created By", name(adj_list["created_by_id"])])
+    ws2.append(["Created At", _when(adj_list["created_at"])])
+    ws2.append(["Closed By", name(adj_list["closed_by_id"])])
+    ws2.append(["Closed At", _when(adj_list["closed_at"])])
+    ws2.append(["Lines", len(active)])
+    ws2.append(["Members", len({line["user_id"] for line in active})])
+    ws2.append(["Points Added", sum(line["amount"] for line in active if line["amount"] > 0)])
+    ws2.append(["Points Removed", -sum(line["amount"] for line in active if line["amount"] < 0)])
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer

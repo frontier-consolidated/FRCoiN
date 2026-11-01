@@ -33,6 +33,7 @@ from helpers import get_org_role_ids, is_admin, is_officer, member_has_org_role,
 from leaderboard import update_leaderboard
 from modals.points_modal import PointsModal
 from views.adjust_panel import AdjustPanel
+from views.adjustment_card import AdjustmentCardButton
 from views.admin_panel import AdminPanel
 from views.common import reply, run_action
 from views.event_card import EventCardButton
@@ -475,10 +476,10 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 # ------------------------
 async def setup_hook():
     await init_db()
-    # Persistent components: the lobby, the leaderboard's My Points button, and every event card's buttons.
+    # Persistent components: the lobby, the leaderboard's My Points button, and every event / adjustment list card's buttons.
     bot.add_view(LobbyView(bot))
     bot.add_view(LeaderboardView())
-    bot.add_dynamic_items(EventCardButton)
+    bot.add_dynamic_items(EventCardButton, AdjustmentCardButton)
 
 bot.setup_hook = setup_hook
 

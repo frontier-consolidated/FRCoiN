@@ -2,6 +2,19 @@
 
 All notable changes to FRCoiN are documented here.
 
+## 2.1.0 — adjustment lists (unreleased)
+
+**DB schema:** changes, new tables only (`adjustment_lists`, `adjustment_lines`), created automatically on first start. Nothing existing is altered, so 2.0.0 still runs against a 2.1.0 database (rollback = redeploy 2.0.0). **Pre-upgrade export:** not needed.
+
+### Added
+
+- **Adjustment lists** — Adjustments → **New adjustment list** posts a card in the panel channel where officers collect many +/- point lines (e.g. an Arms Fayre or bank trades), each with an optional reason, then apply them all at once.
+  - Lines are checked as they're added: additions are for org members only, and a deduction can't take a member below 0 (counting their other lines on the list). The card keeps a live balance check, refreshed whenever any balance changes.
+  - Any officer can add or remove lines; only the officer who created the list, or an admin, can **Apply** or **Cancel** it (both confirm first).
+  - Applying is one database transaction. Each member's lines go through together; a member who can no longer cover their deductions (or would gain points but has left the org) is skipped and named. A list can't be applied twice.
+  - The audit log gets a summary plus an Excel file of every line — reason, who added it, when, and whether it was applied, skipped or removed. Members see each applied line in My Points as `adjlist:<id> <list name>: <reason>`.
+  - Open lists appear in the lobby (`[ADJ]`) and `/status`, and their cards survive restarts like event cards.
+
 ## 2.0.0 — button panel (unreleased)
 
 **DB schema:** changes, additive only. New columns on `events` and new config keys, applied automatically on first start. `users`, `dkp_log` and `attendance` are untouched, so balances and history carry over. 1.x still runs against a migrated DB (rollback = redeploy 1.x). **Pre-upgrade export:** optional — see `SETUP.md`.

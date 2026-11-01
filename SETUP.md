@@ -38,7 +38,15 @@
 4. **Org roles:** only members holding an org role can earn DKP. Everyone else is a *Community Member* — recorded by attendance events, never awarded DKP.
 5. Smoke test: run an attendance event, then a DKP event awarding 1 point to a test member, then check the leaderboard's **My Points**.
 
-## 4. Upgrading from 1.x to 2.0.0
+## 4. Upgrading from 2.0.0 to 2.1.0
+
+A straight file replacement, the same way as 2.0.0: replace the files on `main`, push, and run the **Deploy (prod)** workflow, ideally while no adjustment list or event is mid-way (open events carry over fine).
+
+- **No Discord changes** and no new settings. **Adjustments → New adjustment list** appears for officers straight away.
+- **No backup needed:** 2.1.0 only adds two new tables on first start; balances, events and history are untouched.
+- **Rollback:** redeploy 2.0.0 (tag `v2.0.0`). It ignores the new tables; any lists that were still open simply stop showing until 2.1.0 is back.
+
+## 5. Upgrading from 1.x to 2.0.0
 
 The upgrade is a straight file replacement. Allow about 10 minutes, at a quiet time between events.
 

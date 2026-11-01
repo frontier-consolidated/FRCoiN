@@ -13,14 +13,18 @@ import discord
 from discord.ext import commands
 
 import panel
+from adjustment_lists import (
+    add_lines, apply_list, cancel_list, create_list, get_lines, get_list_in_guild, get_open_lists, list_lock, member_nets,
+    remove_lines,
+)
 from audit_logs import audit_embed, send_audit, send_audit_with_file
-from db import add_dkp, get_config, get_dkp, import_users, set_config, set_dkp
+from db import add_dkp, get_balances, get_config, get_dkp, import_users, set_config, set_dkp
 from events import (
     OPEN_STATES, add_event_attendee, award_and_close_event, close_attendance_event, create_event, delete_event,
     event_lock, get_event_attendees, get_event_in_guild, get_open_events, mark_snapshot, remove_event_attendee,
     set_event_state, take_event_attendance,
 )
-from export import build_dkp_xlsx, build_event_xlsx
+from export import build_adjustment_xlsx, build_dkp_xlsx, build_event_xlsx
 from helpers import (
     bot_can_view, collect_scope_members, get_org_role_ids, is_admin, is_officer, member_has_org_role, scope_voice_channels,
     split_scope_channels,
@@ -36,6 +40,12 @@ KIND_LABELS = {"dkp": "DKP event", "attendance": "Attendance only"}
 
 class ActionError(Exception):
     """A user-facing refusal. The message is shown ephemerally to whoever clicked or ran the command."""
+
+async def balances_changed(bot: commands.Bot, guild: discord.Guild):
+    """After any balance change: refresh the leaderboard, and every open adjustment list's balance check."""
+    await update_leaderboard(bot)
+    for adj_list in await get_open_lists(guild.id):
+        await panel.upsert_list_card(bot, guild, adj_list["id"])
 
 async def require_officer(actor: discord.Member):
     if not await is_officer(actor):
@@ -338,7 +348,7 @@ async def close_event(bot: commands.Bot, guild: discord.Guild, actor: discord.Me
                 raise ActionError(STALE)
 
     if event["kind"] == "dkp":
-        await update_leaderboard(bot)
+        await balances_changed(bot, guild)
         embed = audit_embed("Event DKP Awarded", discord.Colour.green())
     else:
         embed = audit_embed("Attendance Event Closed", discord.Colour.blue())
@@ -371,13 +381,18 @@ async def close_event(bot: commands.Bot, guild: discord.Guild, actor: discord.Me
         return f"Awarded **{points:+} DKP** to **{len(attendee_ids) - len(skipped_ids)} users** for **{event['name']}**.{skipped_note}"
     return f"**{event['name']}** closed with **{len(attendee_ids)}** attendees recorded."
 
-async def dm_creator(bot: commands.Bot, event: dict, embed: discord.Embed) -> bool:
-    """DM the event's creator a copy of the close summary. True if sent (or there's no creator to DM)."""
+async def dm_creator(bot: commands.Bot, event: dict, embed: discord.Embed, content: Union[str, None] = None,
+                     file: Union[discord.File, None] = None) -> bool:
+    """DM the creator of an event (or adjustment list) a copy of its summary. True if sent (or there's no creator to DM)."""
     if not event["created_by_id"]:
         return True
     try:
         user = bot.get_user(event["created_by_id"]) or await bot.fetch_user(event["created_by_id"])
-        await user.send(content=f"Your event **{event['name']}** has been closed.", embed=embed)
+        content = content or f"Your event **{event['name']}** has been closed."
+        if file:
+            await user.send(content=content, embed=embed, file=file)
+        else:
+            await user.send(content=content, embed=embed)
         return True
     except discord.HTTPException as e:
         logger.warning("Could not DM event creator %s: %s", event["created_by_id"], e)
@@ -418,7 +433,7 @@ async def adjust(bot: commands.Bot, guild: discord.Guild, actor: discord.Member,
             raise ActionError(f"**{member.display_name}** isn't an org member, so they can't be given DKP. Negative adjustments and spends still work.")
 
     await add_dkp(member.id, amount, guild_id=guild.id, reason=f"manual_adjust: {reason}", issued_by_id=actor.id)
-    await update_leaderboard(bot)
+    await balances_changed(bot, guild)
 
     embed = audit_embed("DKP Manually Adjusted", discord.Colour.orange())
     embed.add_field(name="Member", value=member.mention, inline=True)
@@ -442,7 +457,7 @@ async def spend(bot: commands.Bot, guild: discord.Guild, actor: discord.Member, 
         clamped_note = f" (requested {amount}, but **{member.display_name}** only had {current} — balance reset to 0)"
 
     await set_dkp(member.id, new_balance, guild_id=guild.id, reason=reason, issued_by_id=actor.id, log_amount=-deducted)
-    await update_leaderboard(bot)
+    await balances_changed(bot, guild)
 
     embed = audit_embed("DKP Spent", discord.Colour.red())
     embed.add_field(name="Member", value=member.mention, inline=True)
@@ -452,6 +467,245 @@ async def spend(bot: commands.Bot, guild: discord.Guild, actor: discord.Member, 
     embed.add_field(name="Spent By", value=actor.mention, inline=False)
     await send_audit(guild, embed)
     return f"**{member.display_name}**'s DKP reduced by **{deducted}** → new balance **{new_balance}**.{clamped_note}"
+
+# ------------------------
+# ADJUSTMENT LISTS
+# ------------------------
+LIST_STALE = "This adjustment list has already been applied or cancelled."
+MAX_LIST_LINES = 200  # keeps the card readable and the apply transaction small
+
+async def get_open_list(guild: discord.Guild, list_id: int) -> dict:
+    adj_list = await get_list_in_guild(list_id, guild.id)
+    if not adj_list:
+        raise ActionError(f"No adjustment list with ID `{list_id}` found for this server.")
+    if adj_list["state"] != "open":
+        raise ActionError(LIST_STALE)
+    return adj_list
+
+async def require_list_owner(actor: discord.Member, adj_list: dict):
+    """Applying or cancelling a list is for whoever created it, or an admin."""
+    if actor.id != adj_list["created_by_id"] and not await is_admin(actor):
+        raise ActionError(f"Only <@{adj_list['created_by_id']}> (who created this list) or an admin can apply or cancel it.")
+
+def _points(n: int) -> str:
+    return f"{n:+}"
+
+async def create_adjustment_list(bot: commands.Bot, guild: discord.Guild, actor: discord.Member, name: str) -> dict:
+    await require_officer(actor)
+    adj_list = await create_list(guild.id, name, actor.id)
+
+    embed = audit_embed("Adjustment List Started", discord.Colour.orange())
+    embed.add_field(name="List", value=name, inline=True)
+    embed.add_field(name="List ID", value=str(adj_list["id"]), inline=True)
+    embed.add_field(name="Started By", value=actor.mention, inline=False)
+    await send_audit(guild, embed)
+
+    await panel.upsert_list_card(bot, guild, adj_list["id"])
+    await panel.refresh_lobby(bot, guild)
+    return adj_list
+
+async def add_adjustment_lines(bot: commands.Bot, guild: discord.Guild, actor: discord.Member, list_id: int,
+                               members: list[Union[discord.Member, discord.User]], amount: int, reason: Union[str, None]) -> str:
+    """One line per member, all with the same points and (optional) reason. Nothing changes balances until the list is applied."""
+    await require_officer(actor)
+    if amount == 0:
+        raise ActionError("Points can't be 0 — use a negative number to deduct, positive to add.")
+    reason = (reason or "").strip() or None
+    members = list({m.id: m for m in members}.values())
+    if bots := [m for m in members if m.bot]:
+        raise ActionError(f"You can't add a bot ({name_list([m.display_name for m in bots])}). Nothing was added.")
+    if strangers := [m for m in members if not isinstance(m, discord.Member)]:
+        raise ActionError(f"{name_list([m.display_name for m in strangers])} isn't in this server. Nothing was added.")
+    if amount > 0:
+        org_role_ids = await get_org_role_ids()
+        if not org_role_ids:
+            raise ActionError(NO_ORG_ROLES)
+        if outsiders := [m for m in members if not member_has_org_role(cast(discord.Member, m), org_role_ids)]:
+            raise ActionError(f"{name_list([f'**{m.display_name}**' for m in outsiders])} isn't an org member, so they can't be "
+                              "given DKP. Deductions still work. Nothing was added.")
+
+    async with list_lock(list_id):
+        adj_list = await get_open_list(guild, list_id)
+        lines = await get_lines(list_id)
+        if len(lines) + len(members) > MAX_LIST_LINES:
+            raise ActionError(f"A list can hold up to {MAX_LIST_LINES} lines. Apply this one and start another.")
+        if amount < 0:
+            nets = member_nets(lines)
+            balances = await get_balances([m.id for m in members])
+            short = []
+            for m in members:
+                already = nets.get(m.id, 0)
+                if balances[m.id] + already + amount < 0:
+                    detail = f"**{m.display_name}** has {balances[m.id]}"
+                    if already:
+                        detail += f" and this list already {'takes' if already < 0 else 'adds'} {abs(already)}"
+                    short.append(detail)
+            if short:
+                raise ActionError("Not enough points: " + "; ".join(short) + ". Nothing was added.")
+        numbers = await add_lines(list_id, [(m.id, amount, reason) for m in members], actor.id)
+        if numbers is None:
+            raise ActionError(LIST_STALE)
+
+    await panel.upsert_list_card(bot, guild, list_id)
+    span = f"#{numbers[0]}" if len(numbers) == 1 else f"#{numbers[0]}–#{numbers[-1]}"
+    return (f"Added {len(numbers)} line{'s' if len(numbers) != 1 else ''} ({span}) to **{adj_list['name']}**: "
+            f"**{_points(amount)}** each{f' — {reason}' if reason else ''}. Nothing changes until the list is applied.")
+
+async def remove_adjustment_lines(bot: commands.Bot, guild: discord.Guild, actor: discord.Member, list_id: int, line_nos: list[int]) -> str:
+    await require_officer(actor)
+    async with list_lock(list_id):
+        adj_list = await get_open_list(guild, list_id)
+        removed = await remove_lines(list_id, line_nos, actor.id)
+    if not removed:
+        raise ActionError(f"No lines {', '.join(f'#{n}' for n in line_nos)} on **{adj_list['name']}** to remove.")
+    await panel.upsert_list_card(bot, guild, list_id)
+    missing = sorted(set(line_nos) - set(removed))
+    note = f" (no line {', '.join(f'#{n}' for n in missing)})" if missing else ""
+    return f"Removed {', '.join(f'#{n}' for n in removed)} from **{adj_list['name']}**{note}."
+
+async def list_shortfalls(guild: discord.Guild, lines: list[dict]) -> tuple[dict[int, tuple[int, int]], set[int]]:
+    """Who would be skipped if the list were applied now: ({user_id: (net, balance)} short of points, {user_id} gaining but not org)."""
+    nets = member_nets(lines)
+    balances = await get_balances(list(nets))
+    org_role_ids = await get_org_role_ids()
+    short = {uid: (net, balances[uid]) for uid, net in nets.items() if net < 0 and balances[uid] + net < 0}
+    not_org = {uid for uid, net in nets.items()
+               if net > 0 and not ((m := guild.get_member(uid)) and member_has_org_role(m, org_role_ids))}
+    return short, not_org
+
+def _skip_lines(short: dict[int, tuple[int, int]], not_org: set[int]) -> list[str]:
+    out = [f"<@{uid}>: balance {balance}, list takes {-net}" for uid, (net, balance) in short.items()]
+    out += [f"<@{uid}>: no longer an org member, can't gain points" for uid in not_org]
+    return out
+
+async def adjustment_list_embed(guild: discord.Guild, adj_list: dict) -> discord.Embed:
+    """The full list, for View all."""
+    lines = await get_lines(adj_list["id"])
+    rows = [f"`#{l['line_no']}` <@{l['user_id']}> **{_points(l['amount'])}**" + (f" — {l['reason']}" if l["reason"] else "")
+            for l in lines]
+    text, shown = "", 0
+    for row in rows:
+        if len(text) + len(row) + 60 > 4096:
+            break
+        text += row + "\n"; shown += 1
+    if shown < len(rows):
+        text += f"… and {len(rows) - shown} more — use **Export** for the full list."
+    embed = discord.Embed(title=f"Adjustment list — {adj_list['name']} (ID: {adj_list['id']})"[:256],
+                          description=text or "*No lines yet.*", colour=discord.Colour.orange())
+    embed.set_footer(text=f"{len(lines)} line(s) • FRCoiN")
+    return embed
+
+async def export_adjustment_list(bot: commands.Bot, guild: discord.Guild, actor: discord.Member, list_id: int) -> tuple[discord.File, str]:
+    await require_officer(actor)
+    adj_list = await get_list_in_guild(list_id, guild.id)
+    if not adj_list:
+        raise ActionError(f"No adjustment list with ID `{list_id}` found for this server.")
+    lines = await get_lines(list_id, include_removed=True)
+    return (discord.File(build_adjustment_xlsx(guild, adj_list, lines), filename=_list_filename(adj_list)),
+            f"Export for **{adj_list['name']}** — {sum(1 for l in lines if not l['removed_at'])} line(s).")
+
+def _list_filename(adj_list: dict) -> str:
+    safe_name = "".join(c for c in adj_list["name"] if c.isalnum() or c in " _-").strip().replace(" ", "_")
+    return f"adjustment_list_{adj_list['id']}_{safe_name}-{int(time.time())}.xlsx"
+
+async def preview_adjustment_list(guild: discord.Guild, actor: discord.Member, list_id: int) -> str:
+    """The text of Apply's confirmation: what will change, and who would be skipped right now."""
+    await require_officer(actor)
+    adj_list = await get_open_list(guild, list_id)
+    await require_list_owner(actor, adj_list)
+    lines = await get_lines(list_id)
+    if not lines:
+        raise ActionError("This list has no lines yet.")
+    nets = member_nets(lines)
+    added = sum(l["amount"] for l in lines if l["amount"] > 0)
+    removed = -sum(l["amount"] for l in lines if l["amount"] < 0)
+    text = (f"Apply **{adj_list['name']}**? {len(lines)} line(s) for {len(nets)} member(s): "
+            f"**-{removed}** / **+{added}** points.")
+    short, not_org = await list_shortfalls(guild, lines)
+    if short or not_org:
+        text += "\nThese members would be **skipped** (all their lines):\n" + "\n".join(f"• {s}" for s in _skip_lines(short, not_org))
+    return text
+
+async def apply_adjustment_list(bot: commands.Bot, guild: discord.Guild, actor: discord.Member, list_id: int) -> str:
+    await require_officer(actor)
+    async with list_lock(list_id):
+        adj_list = await get_open_list(guild, list_id)
+        await require_list_owner(actor, adj_list)
+        lines = await get_lines(list_id)
+        if not lines:
+            raise ActionError("This list has no lines yet.")
+        org_role_ids = await get_org_role_ids()
+        eligible = {uid for uid, net in member_nets(lines).items()
+                    if net > 0 and (m := guild.get_member(uid)) and member_has_org_role(m, org_role_ids)}
+        result = await apply_list(list_id, actor.id, guild.id, eligible)
+        if result is None:
+            raise ActionError(LIST_STALE)
+    applied, skipped = result["applied"], result["skipped"]
+    adj_list = await get_list_in_guild(list_id, guild.id) or adj_list
+    all_lines = await get_lines(list_id, include_removed=True)
+
+    await balances_changed(bot, guild)
+    applied_lines = [l for l in lines if l["user_id"] in applied]
+    embed = audit_embed("Adjustment List Applied", discord.Colour.orange())
+    embed.add_field(name="List", value=adj_list["name"], inline=True)
+    embed.add_field(name="List ID", value=str(list_id), inline=True)
+    embed.add_field(name="Lines", value=str(len(lines)), inline=True)
+    embed.add_field(name="Members Adjusted", value=str(len(applied)), inline=True)
+    embed.add_field(name="Points Removed", value=str(-sum(l["amount"] for l in applied_lines if l["amount"] < 0)), inline=True)
+    embed.add_field(name="Points Added", value=str(sum(l["amount"] for l in applied_lines if l["amount"] > 0)), inline=True)
+    if skipped:
+        short = {uid: v for uid, v in skipped.items() if v[0] < 0}
+        not_org = {uid for uid, v in skipped.items() if v[0] >= 0}
+        embed.add_field(name="Skipped", value="\n".join(_skip_lines(short, not_org))[:1024], inline=False)
+    embed.add_field(name="Created By", value=f"<@{adj_list['created_by_id']}>", inline=True)
+    embed.add_field(name="Applied By", value=actor.mention, inline=True)
+    embed.description = "Every line, with its reason, who added it and what happened to it, is in the attached file."
+
+    if actor.id != adj_list["created_by_id"]:
+        dm_file = discord.File(build_adjustment_xlsx(guild, adj_list, all_lines), filename=_list_filename(adj_list))
+        if not await dm_creator(bot, adj_list, embed, content=f"Your adjustment list **{adj_list['name']}** was applied.", file=dm_file):
+            embed.add_field(name="Note", value="DM to creator failed", inline=False)
+    if not await send_audit_with_file(guild, embed, discord.File(build_adjustment_xlsx(guild, adj_list, all_lines), filename=_list_filename(adj_list))):
+        await send_audit(guild, embed)
+
+    await panel.delete_list_card(bot, adj_list)
+    await panel.refresh_lobby(bot, guild)
+
+    text = (f"Applied **{adj_list['name']}**: {len(applied)} member(s) adjusted "
+            f"(**-{-sum(l['amount'] for l in applied_lines if l['amount'] < 0)}** / "
+            f"**+{sum(l['amount'] for l in applied_lines if l['amount'] > 0)}**).")
+    if skipped:
+        text += f" Skipped {len(skipped)}: " + "; ".join(
+            f"<@{uid}> ({'balance ' + str(bal) + ', needed ' + str(-net) if net < 0 else 'no longer an org member'})"
+            for uid, (net, bal) in skipped.items())
+    return text
+
+async def cancel_adjustment_list(bot: commands.Bot, guild: discord.Guild, actor: discord.Member, list_id: int) -> str:
+    await require_officer(actor)
+    async with list_lock(list_id):
+        adj_list = await get_open_list(guild, list_id)
+        await require_list_owner(actor, adj_list)
+        if not await cancel_list(list_id, actor.id):
+            raise ActionError(LIST_STALE)
+    adj_list = await get_list_in_guild(list_id, guild.id) or adj_list
+    all_lines = await get_lines(list_id, include_removed=True)
+
+    embed = audit_embed("Adjustment List Cancelled", discord.Colour.red())
+    embed.add_field(name="List", value=adj_list["name"], inline=True)
+    embed.add_field(name="List ID", value=str(list_id), inline=True)
+    embed.add_field(name="Lines", value=str(sum(1 for l in all_lines if not l["removed_at"])), inline=True)
+    embed.add_field(name="Created By", value=f"<@{adj_list['created_by_id']}>", inline=True)
+    embed.add_field(name="Cancelled By", value=actor.mention, inline=True)
+    embed.description = "No points were changed. The lines it held are in the attached file."
+    if actor.id != adj_list["created_by_id"]:
+        if not await dm_creator(bot, adj_list, embed, content=f"Your adjustment list **{adj_list['name']}** was cancelled."):
+            embed.add_field(name="Note", value="DM to creator failed", inline=False)
+    if not await send_audit_with_file(guild, embed, discord.File(build_adjustment_xlsx(guild, adj_list, all_lines), filename=_list_filename(adj_list))):
+        await send_audit(guild, embed)
+
+    await panel.delete_list_card(bot, adj_list)
+    await panel.refresh_lobby(bot, guild)
+    return f"**{adj_list['name']}** cancelled. No points were changed."
 
 # ------------------------
 # SAVED EVENTS & LEADERBOARD FILES
@@ -538,7 +792,7 @@ async def import_leaderboard(bot: commands.Bot, guild: discord.Guild, actor: dis
         )
 
     await import_users(rows_to_import)
-    await update_leaderboard(bot)
+    await balances_changed(bot, guild)
 
     embed = audit_embed("Leaderboard Imported", discord.Colour.orange())
     embed.add_field(name="Imported By", value=actor.mention, inline=False)
@@ -630,6 +884,11 @@ async def status_embed(guild: discord.Guild) -> discord.Embed:
 
     embed = discord.Embed(title="FRCoiN Status", colour=discord.Colour.blurple())
     embed.add_field(name=f"Open Events ({len(open_events)})", value=events_str, inline=False)
+    open_lists = await get_open_lists(guild.id)
+    if open_lists:
+        embed.add_field(name=f"Open Adjustment Lists ({len(open_lists)})",
+                        value="\n".join(f"`{a['id']}` [ADJ] **{a['name']}** — by <@{a['created_by_id']}>" for a in open_lists[:15]),
+                        inline=False)
     embed.add_field(name="Panel Channel", value=channel_str(await get_config("panel_channel")), inline=True)
     embed.add_field(name="Leaderboard Channel", value=channel_str(await get_config("leaderboard_channel")), inline=True)
     embed.add_field(name="Audit Channel", value=channel_str(await get_config("audit_channel")), inline=True)

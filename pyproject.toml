@@ -1,6 +1,6 @@
 [project]
 name = "frcoin"
-version = "2.0.0"
+version = "2.1.0"
 requires-python = ">=3.11"
 dependencies = [
     "asyncpg~=0.31.0",
@@ -20,6 +20,7 @@ packages = ["views", "modals"]
 # Top-level single-file modules to install (names without .py extension)
 py-modules = [
     "actions",
+    "adjustment_lists",
     "audit_logs",
     "db",
     "events",
