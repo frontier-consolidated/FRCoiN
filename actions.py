@@ -21,7 +21,10 @@ from events import (
     set_event_state, take_event_attendance,
 )
 from export import build_dkp_xlsx, build_event_xlsx
-from helpers import collect_scope_members, get_org_role_ids, is_admin, is_officer, member_has_org_role, scope_voice_channels
+from helpers import (
+    bot_can_view, collect_scope_members, get_org_role_ids, is_admin, is_officer, member_has_org_role, scope_voice_channels,
+    split_scope_channels,
+)
 from leaderboard import update_leaderboard
 from logger import logger
 
@@ -93,16 +96,27 @@ async def resolve_event(guild: discord.Guild, event_id: Union[int, None]) -> dic
 # ------------------------
 async def start_event(bot: commands.Bot, guild: discord.Guild, actor: discord.Member, name: str,
                       kind: str = "dkp", scope: Union[list[discord.abc.GuildChannel], None] = None) -> tuple[dict, str]:
-    """Returns the new event and a warning (empty if none) naming other open events whose scope shares channels with it."""
+    """Returns the new event and a warning (empty if none): voice channels the bot can't see, and other open events sharing channels."""
     await require_officer(actor)
     if kind == "dkp" and not await get_org_role_ids():
         raise ActionError(NO_ORG_ROLES)
     if any(not isinstance(c, (discord.CategoryChannel, discord.VoiceChannel, discord.StageChannel)) for c in scope or []):
         raise ActionError("The scope must be categories or voice channels.")
+    # The channel picker lists what the officer can see, not what the bot can see.
+    blocked = [c for c in scope or [] if not bot_can_view(c)]
+    if blocked:
+        names = ", ".join(f"**{c.name}**" for c in blocked)
+        raise ActionError(f"The bot can't see {names}, so it couldn't tell who is there. Ask an admin to give the bot "
+                          "**View Channel** on it, or pick different channels.")
     scope_ids = list(dict.fromkeys(c.id for c in scope or []))
 
+    warnings = []
+    hidden = split_scope_channels(guild, scope_ids)[1]
+    if hidden:
+        warnings.append(f"⚠️ The bot can't see {', '.join(f'<#{c.id}>' for c in hidden)}, so anyone in "
+                        f"{'it' if len(hidden) == 1 else 'them'} won't be captured. Ask an admin to give the bot **View Channel** there.")
+
     # Someone in a shared channel would be captured by both events, so tell the officer up front.
-    overlap_warning = ""
     if scope_ids:
         new_channels = {c.id for c in scope_voice_channels(guild, scope_ids)}
         shared = []
@@ -111,8 +125,9 @@ async def start_event(bot: commands.Bot, guild: discord.Guild, actor: discord.Me
             if common:
                 shared.append(f"**{other['name']}** ({', '.join(f'<#{i}>' for i in common)})")
         if shared:
-            overlap_warning = ("⚠️ This event shares voice channels with " + "; ".join(shared)
-                               + ". Anyone in a shared channel will be captured by more than one event.")
+            warnings.append("⚠️ This event shares voice channels with " + "; ".join(shared)
+                            + ". Anyone in a shared channel will be captured by more than one event.")
+    overlap_warning = "\n".join(warnings)
 
     event = await create_event(guild.id, name, kind, actor.id, scope_ids)
 
@@ -177,6 +192,10 @@ async def snapshot_event(bot: commands.Bot, guild: discord.Guild, actor: discord
     await send_audit(guild, embed)
 
     skipped_note = f" Skipped **{skipped}** non-org member(s)." if event["kind"] == "dkp" and skipped else ""
+    hidden = split_scope_channels(guild, event["scope_channel_ids"])[1]
+    if hidden:
+        skipped_note += (f"\n⚠️ Couldn't check {', '.join(f'<#{c.id}>' for c in hidden)}: the bot can't see "
+                         f"{'it' if len(hidden) == 1 else 'them'}. Ask an admin to give the bot **View Channel** there.")
     return (f"Captured **{len(captured)}** from voice ({breakdown_str}) into **{event['name']}** — "
             f"**{len(new)} new**, {len(left)} on the list no longer in voice.{skipped_note}")
 

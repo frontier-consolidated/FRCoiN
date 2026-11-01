@@ -31,6 +31,11 @@ class EventCreateModal(discord.ui.Modal):
         if not ctx:
             return
         guild, actor = ctx
+        # The picker lists every channel the officer can see; one the bot doesn't know about can't be snapshotted.
+        unknown = [v.name for v in self.scope_select.values if not guild.get_channel(v.id)]
+        if unknown:
+            return await reply(interaction, f"The bot can't see {', '.join(f'**{n}**' for n in unknown)}, so it couldn't tell who is there. "
+                                            "Ask an admin to give the bot **View Channel** on it, or pick different channels.")
         scope = [c for v in self.scope_select.values if (c := guild.get_channel(v.id))]
         name = self.name_input.value.strip()
 

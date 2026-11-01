@@ -59,11 +59,18 @@ async def slash_allowed(member: discord.Member) -> bool:
 # ------------------------
 VOICE_TYPES = (discord.VoiceChannel, discord.StageChannel)
 
-def scope_voice_channels(guild: discord.Guild, scope_channel_ids: list[int] | None) -> list[discord.VoiceChannel | discord.StageChannel]:
+def bot_can_view(channel: discord.abc.GuildChannel) -> bool:
+    """Whether the bot itself can see a channel, and so who is in it."""
+    return bool(channel.permissions_for(channel.guild.me).view_channel)
+
+def split_scope_channels(
+    guild: discord.Guild, scope_channel_ids: list[int] | None
+) -> tuple[list[discord.VoiceChannel | discord.StageChannel], list[discord.VoiceChannel | discord.StageChannel]]:
     """
-    The voice/stage channels an event's scope covers. Each stored id is a voice channel or a category;
-    a category covers every voice/stage channel under it, read live so channels created mid-event are included.
-    Deleted channels are skipped, and a channel picked both directly and via its category is counted once.
+    The voice/stage channels an event's scope covers, as (visible to the bot, hidden from the bot).
+    Each stored id is a voice channel or a category; a category covers every voice/stage channel under it,
+    read live so channels created mid-event are included. Deleted channels are skipped, and a channel picked
+    both directly and via its category is counted once.
     """
     channels: dict[int, discord.VoiceChannel | discord.StageChannel] = {}
     for channel_id in scope_channel_ids or []:
@@ -72,7 +79,13 @@ def scope_voice_channels(guild: discord.Guild, scope_channel_ids: list[int] | No
             channels.update((c.id, c) for c in scope.channels if isinstance(c, VOICE_TYPES))
         elif isinstance(scope, VOICE_TYPES):
             channels[scope.id] = scope
-    return list(channels.values())
+    visible = [c for c in channels.values() if bot_can_view(c)]
+    hidden = [c for c in channels.values() if not bot_can_view(c)]
+    return visible, hidden
+
+def scope_voice_channels(guild: discord.Guild, scope_channel_ids: list[int] | None) -> list[discord.VoiceChannel | discord.StageChannel]:
+    """The voice channels in an event's scope that the bot can see. Hidden ones would always look empty."""
+    return split_scope_channels(guild, scope_channel_ids)[0]
 
 def collect_scope_members(
     guild: discord.Guild, scope_channel_ids: list[int] | None, fallback_member: discord.Member | None
