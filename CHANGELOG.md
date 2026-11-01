@@ -24,6 +24,11 @@ All notable changes to FRCoiN are documented here.
 - `/snapshot_event` no longer has the `org_only` option — the event type decides who is captured. Use an attendance event to record Community Members.
 - `/end_event` still awards immediately, and now also removes the event's card and DMs its creator.
 - The panel and every card are restored on startup, so they keep working across restarts and deploys.
+- **Officer's Guide 2.0.0** (`Officer_Guide_2.0.0.docx` / `.pdf`) replaces `Officer_Guide.docx`: a panel-first walkthrough with screenshots of every screen officers see. The slash commands are kept as a reference section.
+
+### Fixed
+
+- `/spend` (and the panel's Spend button) now records the amount deducted in the DKP log, e.g. `-50`. It used to record the member's new balance, so a spend of 50 from 152 showed as `+102`. Entries written before 2.0.0 keep the old values, because the deducted amount wasn't stored.
 
 ## 2026-10-26
 

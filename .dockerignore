@@ -1,6 +1,7 @@
 .git
 *.md
 *.docx
+*.pdf
 
 pulumi/
 backups/
