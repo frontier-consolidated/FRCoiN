@@ -77,7 +77,7 @@ async def init_db():
         await conn.execute("""
             ALTER TABLE events ADD COLUMN IF NOT EXISTS dkp_awarded INTEGER
         """)
-        # V2 migration: panel state. Additive only, so v1 still runs against a migrated DB.
+        # 2.0.0 migration: panel state. Additive only, so 1.x still runs against a migrated DB.
         await conn.execute("""
             ALTER TABLE events
                 ADD COLUMN IF NOT EXISTS state                   TEXT NOT NULL DEFAULT 'open',
@@ -90,7 +90,7 @@ async def init_db():
                 ADD COLUMN IF NOT EXISTS last_snapshot_at        TIMESTAMPTZ,
                 ADD COLUMN IF NOT EXISTS last_snapshot_breakdown JSONB
         """)
-        # Pre-release demo builds stored a single scope_channel_id; fold it into the list. No-op on v1 databases.
+        # Pre-release 2.0.0 test builds stored a single scope_channel_id; fold it into the list. No-op on 1.x databases.
         await conn.execute("""
             DO $$ BEGIN
                 IF EXISTS (SELECT 1 FROM information_schema.columns

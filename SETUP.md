@@ -38,17 +38,17 @@
 4. **Org roles:** only members holding an org role can earn DKP. Everyone else is a *Community Member* — recorded by attendance events, never awarded DKP.
 5. Smoke test: run an attendance event, then a DKP event awarding 1 point to a test member, then check the leaderboard's **My Points**.
 
-## 4. Upgrading from v1 to V2
+## 4. Upgrading from 1.x to 2.0.0
 
 The upgrade is a straight file replacement. Allow about 10 minutes, at a quiet time between events.
 
 ### Discord prerequisites
 
-Do these in Discord before the deploy. None of them affect v1, so they can be done days ahead.
+Do these in Discord before the deploy. None of them affect 1.x, so they can be done days ahead.
 
 **1. Bot permission.** Give the bot's role **Manage Roles** (Server Settings → Roles). The bot only uses it to set the panel channel's permissions. It never changes anyone's roles.
 
-**2. Org roles must be set.** In v1 they were an optional snapshot filter. In V2 **only org members can earn DKP**. If no org roles are set, DKP events and positive adjustments are blocked with a "run setup first" message. Check `/status` in v1: if *Org Roles* shows *(all members)*, run `/setup org_roles:@Member` (comma-separate several roles) before upgrading.
+**2. Org roles must be set.** In 1.x they were an optional snapshot filter. In 2.0.0 **only org members can earn DKP**. If no org roles are set, DKP events and positive adjustments are blocked with a "run setup first" message. Check `/status` in 1.x: if *Org Roles* shows *(all members)*, run `/setup org_roles:@Member` (comma-separate several roles) before upgrading.
 
 **3. Channels**
 
@@ -66,17 +66,17 @@ Do these in Discord before the deploy. None of them affect v1, so they can be do
 | Panel channel | **Required, new** | `/setup panel_channel:#frcoin-panel` |
 | Org roles | Required if not already set (see 2) | `/setup org_roles:…` |
 | Leaderboard, audit channels; admin, officer roles | No, they carry over | Change later only if wanted |
-| Slash command access | No, defaults to Officer+ (same as v1) | Switch to Admin-only later, in rollout phase 2 |
+| Slash command access | No, defaults to Officer+ (same as 1.x) | Switch to Admin-only later, in rollout phase 2 |
 
-After the panel channel is set, everything else can also be changed from **Admin → Setup: Channels / Roles** using pickers. `/setup` and the Setup buttons need the Discord **Administrator** permission, as in v1.
+After the panel channel is set, everything else can also be changed from **Admin → Setup: Channels / Roles** using pickers. `/setup` and the Setup buttons need the Discord **Administrator** permission, as in 1.x.
 
 **Before** (with the Discord prerequisites above done):
-1. Finish or cancel any open event (`/status` shows it). An open v1 event does carry over, but it's simpler not to have one.
+1. Finish or cancel any open event (`/status` shows it). An open 1.x event does carry over, but it's simpler not to have one.
 2. Tell officers there's a short freeze: no FRCoiN commands until the panel appears in `#frcoin-panel`. While the deploy swaps the old bot for the new one, both can briefly be online at the same time and answer the same command twice, and any form someone has open in the old bot is lost.
 3. Optional: run `/export_leaderboard` and keep the file (see below).
 
 **Deploy:**
-4. Replace the repo's files with the V2 files on `main`, push, and run the **Deploy (prod)** workflow.
+4. Replace the repo's files with the 2.0.0 files on `main`, push, and run the **Deploy (prod)** workflow.
 5. On first start the bot migrates the database itself, re-syncs slash commands, and adds the My Points button to the leaderboard. No new environment variables or secrets are needed.
 
 **After:**
@@ -90,6 +90,6 @@ After the panel channel is set, everything else can also be changed from **Admin
 **Optional precaution:** run `/export_leaderboard` before deploying and keep the `.xlsx` (restore with `/import_leaderboard`). That file covers balances only; for event history and the DKP log as well, take a database dump:
 `pg_dump "$DATABASE_URL" > frcoin-backup.sql`
 
-Best done **between events**. If a v1 event is open during the upgrade, it becomes an open DKP event and gets a card on startup. It has no stored voice scope, so its snapshots use the officer's current voice channel, like v1.
+Best done **between events**. If a 1.x event is open during the upgrade, it becomes an open DKP event and gets a card on startup. It has no stored voice scope, so its snapshots use the officer's current voice channel, like 1.x.
 
-**Rollback:** redeploy the previous `main` commit. v1 ignores the new columns, so it runs fine against the migrated database. First close or cancel any open V2 events: v1 can only track one open event, so it would only see the newest. If you later upgrade again, events that v1 ended are recognised as closed, and they're never awarded twice.
+**Rollback:** redeploy the previous `main` commit (a copy of 1.x is also kept on the `main` branch of the personal backup repo). 1.x ignores the new columns, so it runs fine against the migrated database. First close or cancel any open 2.0.0 events: 1.x can only track one open event, so it would only see the newest. If you later upgrade again, events that 1.x ended are recognised as closed, and they're never awarded twice.

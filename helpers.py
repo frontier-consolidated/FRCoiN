@@ -79,7 +79,7 @@ def collect_scope_members(
 ) -> tuple[list[discord.Member], dict[str, int]] | None:
     """
     Everyone (bots excluded) in the event's voice scope, plus a {channel name: count} breakdown.
-    With no stored scope, falls back to the clicking officer's current voice channel (v1 behaviour).
+    With no stored scope, falls back to the clicking officer's current voice channel (1.x behaviour).
     Returns None if there's nothing to snapshot (scope deleted, or no scope and the officer isn't in voice).
     """
     if scope_channel_ids:

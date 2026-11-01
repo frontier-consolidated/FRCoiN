@@ -28,7 +28,7 @@ def _decode(row) -> Union[dict, None]:
     if row is None:
         return None
     event = dict(row)
-    if event["ended"]:  # v1 ends events without knowing about `state`, so `ended` wins
+    if event["ended"]:  # 1.x ends events without knowing about `state`, so `ended` wins
         event["state"] = "closed"
     breakdown = event.get("last_snapshot_breakdown")
     event["last_snapshot_breakdown"] = json.loads(breakdown) if breakdown else None
@@ -121,7 +121,7 @@ async def end_event(event_id: int, dkp_awarded: int):
         )
 
 async def close_attendance_event(event_id: int) -> bool:
-    """Archive an attendance event. `ended` is set too, so v1 never treats it as active. Returns False if already closed."""
+    """Archive an attendance event. `ended` is set too, so 1.x never treats it as active. Returns False if already closed."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(

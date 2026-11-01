@@ -2,9 +2,9 @@
 
 All notable changes to FRCoiN are documented here.
 
-## V2 — button panel (unreleased demo, pending Board approval)
+## 2.0.0 — button panel (unreleased)
 
-**DB schema:** changes, additive only. New columns on `events` and new config keys, applied automatically on first start. `users`, `dkp_log` and `attendance` are untouched, so balances and history carry over. v1 still runs against a migrated DB (rollback = redeploy v1). **Pre-upgrade export:** optional — see `SETUP.md`.
+**DB schema:** changes, additive only. New columns on `events` and new config keys, applied automatically on first start. `users`, `dkp_log` and `attendance` are untouched, so balances and history carry over. 1.x still runs against a migrated DB (rollback = redeploy 1.x). **Pre-upgrade export:** optional — see `SETUP.md`.
 
 ### Added
 
