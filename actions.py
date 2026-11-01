@@ -150,11 +150,17 @@ async def snapshot_event(bot: commands.Bot, guild: discord.Guild, actor: discord
         if event["state"] != "open":
             raise ActionError("Points have already been entered for this event — press **Reopen** to snapshot again.")
 
+        # No stored scope: the officer's own voice channel is used, and the bot has to be able to see it.
+        own_channel = actor.voice.channel if actor.voice else None
+        if not event["scope_channel_ids"] and own_channel and not bot_can_view(own_channel):
+            raise ActionError(f"The bot can't see **{own_channel.name}**, the voice channel you're in, so it can't tell who is there. "
+                              "Ask an admin to give the bot **View Channel** there, or move to a channel the bot can see.")
         collected = collect_scope_members(guild, event["scope_channel_ids"], actor)
         if collected is None:
             if event["scope_channel_ids"]:
                 raise ActionError("This event's voice scope no longer exists. Join a voice channel and use `/snapshot_event`, or start a new event.")
-            raise ActionError("This event has no voice scope, so you must be in a voice channel to snapshot.")
+            raise ActionError("This event has no voice scope, so you must be in a voice channel the bot can see to snapshot. "
+                              "If you are in one, the bot may not have **View Channel** there — ask an admin.")
         in_voice, breakdown = collected
 
         if event["kind"] == "dkp":

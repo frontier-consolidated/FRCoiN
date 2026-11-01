@@ -24,7 +24,7 @@ All notable changes to FRCoiN are documented here.
 - `/snapshot_event` no longer has the `org_only` option — the event type decides who is captured. Use an attendance event to record Community Members.
 - `/end_event` still awards immediately, and now also removes the event's card and DMs its creator.
 - The panel and every card are restored on startup, so they keep working across restarts and deploys.
-- Voice scopes are checked against what the **bot** can see (Discord's channel picker lists what the officer can see). Picking a channel or category the bot can't view is refused with its name; a category containing hidden voice channels gets a warning, and snapshots name any channel they couldn't check instead of counting it as empty.
+- Voice scopes are checked against what the **bot** can see (Discord's channel picker lists what the officer can see). Picking a channel or category the bot can't view is refused with its name; a category containing hidden voice channels gets a warning, and snapshots name any channel they couldn't check instead of counting it as empty. A snapshot for an event with no scope refuses when the officer's own voice channel is hidden from the bot, instead of capturing nobody.
 - **Officer's Guide 2.0.0** (`Officer_Guide_2.0.0.docx` / `.pdf`) replaces `Officer_Guide.docx`: a panel-first walkthrough with screenshots of every screen officers see. The slash commands are kept as a reference section.
 
 ### Fixed
