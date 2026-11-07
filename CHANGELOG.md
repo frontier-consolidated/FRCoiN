@@ -2,7 +2,7 @@
 
 All notable changes to FRCoiN are documented here.
 
-## 2.2.0 — edit an event's voice scope (unreleased)
+## 2.2.0 — edit an event's voice scope (2026-11-07)
 
 **DB schema:** no changes. **Pre-upgrade export:** not needed.
 
@@ -10,7 +10,7 @@ All notable changes to FRCoiN are documented here.
 
 - **Edit scope** button on event cards: change which voice channels or categories an open event's snapshots look at, using the same picker as Create Event with the current channels pre-selected. Nobody already on the attendance list is removed — the new scope applies from the next snapshot. The same checks as creating an event apply (channels the bot can't see are refused; overlapping another open event gives a warning), it's not available while points are pending (press **Reopen** first), and every change goes to the audit log with the old and new scope.
 
-## 2.1.0 — adjustment lists (unreleased)
+## 2.1.0 — adjustment lists (2026-11-07)
 
 **DB schema:** changes, new tables only (`adjustment_lists`, `adjustment_lines`), created automatically on first start. Nothing existing is altered. 2.1.0 is deployed straight over 1.x, together with the 2.0.0 changes below; 1.x still runs against a 2.1.0 database (rollback = redeploy 1.x). **Pre-upgrade export:** optional — see `SETUP.md`.
 
