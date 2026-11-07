@@ -22,7 +22,7 @@ from db import add_dkp, get_balances, get_config, get_dkp, import_users, set_con
 from events import (
     OPEN_STATES, add_event_attendee, award_and_close_event, close_attendance_event, create_event, delete_event,
     event_lock, get_event_attendees, get_event_in_guild, get_open_events, mark_snapshot, remove_event_attendee,
-    set_event_state, take_event_attendance,
+    set_event_scope, set_event_state, take_event_attendance,
 )
 from export import build_adjustment_xlsx, build_dkp_xlsx, build_event_xlsx
 from helpers import (
@@ -104,12 +104,12 @@ async def resolve_event(guild: discord.Guild, event_id: Union[int, None]) -> dic
 # ------------------------
 # EVENT LIFECYCLE
 # ------------------------
-async def start_event(bot: commands.Bot, guild: discord.Guild, actor: discord.Member, name: str,
-                      kind: str = "dkp", scope: Union[list[discord.abc.GuildChannel], None] = None) -> tuple[dict, str]:
-    """Returns the new event and a warning (empty if none): voice channels the bot can't see, and other open events sharing channels."""
-    await require_officer(actor)
-    if kind == "dkp" and not await get_org_role_ids():
-        raise ActionError(NO_ORG_ROLES)
+async def check_scope(guild: discord.Guild, scope: Union[list[discord.abc.GuildChannel], None],
+                      exclude_event_id: Union[int, None] = None) -> tuple[list[int], str]:
+    """
+    Validate a voice scope picked in a form or command. Returns its channel ids and a warning (empty if none):
+    voice channels the bot can't see, and other open events sharing channels. Raises ActionError if unusable.
+    """
     if any(not isinstance(c, (discord.CategoryChannel, discord.VoiceChannel, discord.StageChannel)) for c in scope or []):
         raise ActionError("The scope must be categories or voice channels.")
     # The channel picker lists what the officer can see, not what the bot can see.
@@ -131,13 +131,23 @@ async def start_event(bot: commands.Bot, guild: discord.Guild, actor: discord.Me
         new_channels = {c.id for c in scope_voice_channels(guild, scope_ids)}
         shared = []
         for other in await get_open_events(guild.id):
+            if other["id"] == exclude_event_id:
+                continue
             common = new_channels & {c.id for c in scope_voice_channels(guild, other["scope_channel_ids"])}
             if common:
                 shared.append(f"**{other['name']}** ({', '.join(f'<#{i}>' for i in common)})")
         if shared:
             warnings.append("⚠️ This event shares voice channels with " + "; ".join(shared)
                             + ". Anyone in a shared channel will be captured by more than one event.")
-    overlap_warning = "\n".join(warnings)
+    return scope_ids, "\n".join(warnings)
+
+async def start_event(bot: commands.Bot, guild: discord.Guild, actor: discord.Member, name: str,
+                      kind: str = "dkp", scope: Union[list[discord.abc.GuildChannel], None] = None) -> tuple[dict, str]:
+    """Returns the new event and a warning (empty if none): voice channels the bot can't see, and other open events sharing channels."""
+    await require_officer(actor)
+    if kind == "dkp" and not await get_org_role_ids():
+        raise ActionError(NO_ORG_ROLES)
+    scope_ids, overlap_warning = await check_scope(guild, scope)
 
     event = await create_event(guild.id, name, kind, actor.id, scope_ids)
 
@@ -152,6 +162,36 @@ async def start_event(bot: commands.Bot, guild: discord.Guild, actor: discord.Me
     await panel.upsert_card(bot, guild, event["id"])
     await panel.refresh_lobby(bot, guild)
     return event, overlap_warning
+
+async def edit_event_scope(bot: commands.Bot, guild: discord.Guild, actor: discord.Member, event_id: int,
+                           scope: Union[list[discord.abc.GuildChannel], None]) -> str:
+    """Change which voice channels future snapshots look at. Nobody already on the list is removed."""
+    await require_officer(actor)
+    async with event_lock(event_id):
+        event = await get_open_event(guild, event_id)
+        if event["state"] != "open":
+            raise ActionError("Points have already been entered for this event — press **Reopen** to change its scope.")
+        scope_ids, warning = await check_scope(guild, scope, exclude_event_id=event_id)
+        old_ids = event["scope_channel_ids"] or []
+        if scope_ids == list(old_ids):
+            raise ActionError("That's the scope the event already has — nothing changed.")
+        if not await set_event_scope(event_id, scope_ids):
+            raise ActionError(STALE)
+
+    await panel.upsert_card(bot, guild, event_id)
+
+    old_label, new_label = scope_label(guild, old_ids), scope_label(guild, scope_ids)
+    embed = audit_embed("Event Scope Changed", discord.Colour.teal())
+    embed.add_field(name="Event", value=event["name"], inline=True)
+    embed.add_field(name="Event ID", value=str(event_id), inline=True)
+    embed.add_field(name="Old Scope", value=old_label[:1024], inline=False)
+    embed.add_field(name="New Scope", value=new_label[:1024], inline=False)
+    embed.add_field(name="Changed By", value=actor.mention, inline=False)
+    await send_audit(guild, embed)
+
+    text = (f"**{event['name']}** now looks at: {new_label}.\n"
+            "Nobody already on the attendance list was removed — the new scope applies from the next snapshot.")
+    return text + (f"\n{warning}" if warning else "")
 
 async def snapshot_event(bot: commands.Bot, guild: discord.Guild, actor: discord.Member, event_id: int) -> str:
     await require_officer(actor)

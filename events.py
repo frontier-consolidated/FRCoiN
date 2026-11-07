@@ -86,6 +86,16 @@ async def create_event(guild_id: int, name: str, kind: str = "dkp",
 
     return _decode(row)
 
+async def set_event_scope(event_id: int, scope_channel_ids: list[int]) -> bool:
+    """Change an open event's voice scope. Returns False if the event isn't open (e.g. points are pending)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "UPDATE events SET scope_channel_ids = $1 WHERE id = $2 AND state = 'open' AND NOT ended RETURNING id",
+            scope_channel_ids or None, event_id
+        )
+    return row is not None
+
 async def set_event_state(event_id: int, state: str, pending_points: Union[int, None] = None):
     pool = await get_pool()
     async with pool.acquire() as conn:

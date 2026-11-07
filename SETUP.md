@@ -38,7 +38,14 @@
 4. **Org roles:** only members holding an org role can earn DKP. Everyone else is a *Community Member* — recorded by attendance events, never awarded DKP.
 5. Smoke test: run an attendance event, then a DKP event awarding 1 point to a test member, then check the leaderboard's **My Points**.
 
-## 4. Upgrading from 1.x to 2.1.0
+## 4. Upgrading from 2.1.0 to 2.2.0
+
+A straight file replacement: put the 2.2.0 files on `main`, push, and run the **Deploy (prod)** workflow. Open events carry over.
+
+- **No database changes, no Discord changes, no new settings.** The **Edit scope** button appears on every open event's card when the bot starts.
+- **Rollback:** reset `main` to tag `v2.1.0` and run the workflow again.
+
+## 5. Upgrading from 1.x to 2.1.0
 
 The upgrade is a straight file replacement. Allow about 10 minutes, at a quiet time between events.
 

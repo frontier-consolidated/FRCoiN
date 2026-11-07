@@ -15,7 +15,7 @@ Quick start: `python -m venv .venv`, `.venv/bin/pip install .`, copy `.env.examp
 Officers run everything from buttons in one **Officers+-only panel channel** (`/setup panel_channel:#…`). Regular members never see it — the bot locks the channel down for you.
 
 - **Lobby** — *Create Event* (DKP), *Take Attendance* (no DKP), *Adjustments*, *Admin*, and a dropdown that brings any open event's card back to the bottom.
-- **Event cards** — one per open event; any officer can operate any card: *Snapshot / Update snapshot*, *Add / Remove member*, *Attendance*, *Export list*, *End event → Close event*, *Cancel*. Cards keep working for hours and across bot restarts.
+- **Event cards** — one per open event; any officer can operate any card: *Snapshot / Update snapshot*, *Add / Remove member*, *Attendance*, *Export list*, *Edit scope*, *End event → Close event*, *Cancel*. Cards keep working for hours and across bot restarts.
 - **Multi-channel snapshots** — give an event one or more voice channels, or a whole category, as its scope and one click captures them all, without being in voice yourself. Two events can share a category by each picking their own channels; you're warned if their scopes overlap. The card shows the per-channel breakdown, who's new, and who has left voice.
 - **Only org members can earn DKP.** Everyone else is a *Community Member*: recorded by attendance events, never awarded DKP.
 - **Adjustment lists** — collect many +/- point lines (an Arms Fayre, bank trades) on one card, each with an optional reason, then apply them all at once. Only the list's creator or an admin can apply it, and everything is recorded in the audit log.

@@ -14,6 +14,7 @@ CARD_BUTTONS = {
     "remove": ("Remove member", discord.ButtonStyle.secondary),
     "list": ("Attendance", discord.ButtonStyle.secondary),
     "export": ("Export list", discord.ButtonStyle.secondary),
+    "scope": ("Edit scope", discord.ButtonStyle.secondary),
     "end": ("End event", discord.ButtonStyle.success),
     "close": ("Close event", discord.ButtonStyle.success),
     "editpts": ("Edit points", discord.ButtonStyle.secondary),
@@ -50,13 +51,19 @@ class EventCardButton(discord.ui.DynamicItem[discord.ui.Button], template=r"frc:
         if not await is_officer(actor):
             return await reply(interaction, actions.NO_PERMISSION)
 
-        if self.action in ("add", "remove", "end", "editpts"):
+        if self.action in ("add", "remove", "end", "editpts", "scope"):
             # Modals must be the first response, so check the event is still open before opening one.
             event = await run_action(interaction, lambda: actions.get_open_event(guild, event_id), defer=False)
             if not event:
                 return
             from modals.member_modal import MemberModal
             from modals.points_modal import PointsModal
+            if self.action == "scope":
+                if event["state"] != "open":
+                    return await reply(interaction, "Points have already been entered for this event — press **Reopen** to change its scope.")
+                from modals.event_create_modal import EditScopeModal
+                current = [c for i in event["scope_channel_ids"] or [] if (c := guild.get_channel(i))]
+                return await interaction.response.send_modal(EditScopeModal(bot, event_id, current))
             if self.action in ("add", "remove"):
                 return await interaction.response.send_modal(MemberModal(bot, event_id, self.action))
             return await interaction.response.send_modal(
@@ -113,7 +120,7 @@ def build_card_view(event: dict, has_attendees: bool) -> discord.ui.View:
     else:
         layout = [
             ("snapshot", snapshot_label, 0), ("add", None, 0), ("remove", None, 0), ("list", None, 0),
-            ("export", None, 1),
+            ("export", None, 1), ("scope", None, 1),
         ]
         if event["kind"] == "attendance":
             layout.append(("close", None, 1))
