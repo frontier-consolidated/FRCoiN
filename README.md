@@ -6,7 +6,7 @@ Frontier Consolidated "DKP" Bot
 
 See **[SETUP.md](SETUP.md)** for running the bot, the Discord invite and permissions, first-run server configuration, and upgrading from 1.x.
 
-**Officers:** see the **[Officer's Guide 2.0.0](Officer_Guide_2.0.0.pdf)** for how to use the panel.
+**Officers:** see the **[Officer's Guide 2.1.0](Officer_Guide_2.1.0.pdf)** for how to use the panel.
 
 Quick start: `python -m venv .venv`, `.venv/bin/pip install .`, copy `.env.example` to `.env` and fill it in, then `.venv/bin/python -m main` (on Windows use `.venv\Scripts\…`).
 

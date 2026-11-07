@@ -4,7 +4,7 @@ All notable changes to FRCoiN are documented here.
 
 ## 2.1.0 — adjustment lists (unreleased)
 
-**DB schema:** changes, new tables only (`adjustment_lists`, `adjustment_lines`), created automatically on first start. Nothing existing is altered, so 2.0.0 still runs against a 2.1.0 database (rollback = redeploy 2.0.0). **Pre-upgrade export:** not needed.
+**DB schema:** changes, new tables only (`adjustment_lists`, `adjustment_lines`), created automatically on first start. Nothing existing is altered. 2.1.0 is deployed straight over 1.x, together with the 2.0.0 changes below; 1.x still runs against a 2.1.0 database (rollback = redeploy 1.x). **Pre-upgrade export:** optional — see `SETUP.md`.
 
 ### Added
 
@@ -14,8 +14,9 @@ All notable changes to FRCoiN are documented here.
   - Applying is one database transaction. Each member's lines go through together; a member who can no longer cover their deductions (or would gain points but has left the org) is skipped and named. A list can't be applied twice.
   - The audit log gets a summary plus an Excel file of every line — reason, who added it, when, and whether it was applied, skipped or removed. Members see each applied line in My Points as `adjlist:<id> <list name>: <reason>`.
   - Open lists appear in the lobby (`[ADJ]`) and `/status`, and their cards survive restarts like event cards.
+- **Officer's Guide 2.1.0** (`Officer_Guide_2.1.0.docx` / `.pdf`) replaces the 2.0.0 edition, adding an "Adjustment lists" section with screenshots.
 
-## 2.0.0 — button panel (unreleased)
+## 2.0.0 — button panel (not released on its own — ships as part of 2.1.0)
 
 **DB schema:** changes, additive only. New columns on `events` and new config keys, applied automatically on first start. `users`, `dkp_log` and `attendance` are untouched, so balances and history carry over. 1.x still runs against a migrated DB (rollback = redeploy 1.x). **Pre-upgrade export:** optional — see `SETUP.md`.
 

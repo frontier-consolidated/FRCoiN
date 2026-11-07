@@ -38,15 +38,7 @@
 4. **Org roles:** only members holding an org role can earn DKP. Everyone else is a *Community Member* — recorded by attendance events, never awarded DKP.
 5. Smoke test: run an attendance event, then a DKP event awarding 1 point to a test member, then check the leaderboard's **My Points**.
 
-## 4. Upgrading from 2.0.0 to 2.1.0
-
-A straight file replacement, the same way as 2.0.0: replace the files on `main`, push, and run the **Deploy (prod)** workflow, ideally while no adjustment list or event is mid-way (open events carry over fine).
-
-- **No Discord changes** and no new settings. **Adjustments → New adjustment list** appears for officers straight away.
-- **No backup needed:** 2.1.0 only adds two new tables on first start; balances, events and history are untouched.
-- **Rollback:** redeploy 2.0.0 (tag `v2.0.0`). It ignores the new tables; any lists that were still open simply stop showing until 2.1.0 is back.
-
-## 5. Upgrading from 1.x to 2.0.0
+## 4. Upgrading from 1.x to 2.1.0
 
 The upgrade is a straight file replacement. Allow about 10 minutes, at a quiet time between events.
 
@@ -56,7 +48,7 @@ Do these in Discord before the deploy. None of them affect 1.x, so they can be d
 
 **1. Bot permission.** Give the bot's role **Manage Roles** (Server Settings → Roles). The bot only uses it to set the panel channel's permissions. It never changes anyone's roles.
 
-**2. Org roles must be set.** In 1.x they were an optional snapshot filter. In 2.0.0 **only org members can earn DKP**. If no org roles are set, DKP events and positive adjustments are blocked with a "run setup first" message. Check `/status` in 1.x: if *Org Roles* shows *(all members)*, run `/setup org_roles:@Member` (comma-separate several roles) before upgrading.
+**2. Org roles must be set.** In 1.x they were an optional snapshot filter. In 2.1.0 **only org members can earn DKP**. If no org roles are set, DKP events and positive adjustments are blocked with a "run setup first" message. Check `/status` in 1.x: if *Org Roles* shows *(all members)*, run `/setup org_roles:@Member` (comma-separate several roles) before upgrading.
 
 **3. Channels**
 
@@ -84,9 +76,9 @@ After the panel channel is set, everything else can also be changed from **Admin
 3. Optional: run `/export_leaderboard` and keep the file (see below).
 
 **Deploy:**
-4. Keep 1.x as a branch, then put 2.0.0 on `main` (the deploy workflow only runs from `main`):
+4. Keep 1.x as a branch, then put 2.1.0 on `main` (the deploy workflow only runs from `main`):
    - create a branch `v1` and a tag `v1-final` from the current `main` and push both;
-   - replace the files on `main` with the 2.0.0 files, push, and run the **Deploy (prod)** workflow.
+   - replace the files on `main` with the 2.1.0 files, push, and run the **Deploy (prod)** workflow.
 5. On first start the bot migrates the database itself, re-syncs slash commands, and adds the My Points button to the leaderboard. No new environment variables or secrets are needed.
 
 **After:**
@@ -95,11 +87,11 @@ After the panel channel is set, everything else can also be changed from **Admin
 8. Smoke test: **Take Attendance** → Snapshot → Close. Nobody's points change, and the audit channel shows the close.
 9. Lift the freeze. Tell officers that `org_only` is gone from `/snapshot_event` — use an attendance event to record Community Members.
 
-**Is a backup required?** No. The schema changes are additive only (new columns on `events`, new config keys). `users`, `dkp_log` and `attendance` are not changed, so balances and history carry over untouched.
+**Is a backup required?** No. The schema changes are additive only (new columns on `events`, new config keys, and two new tables for adjustment lists). `users`, `dkp_log` and `attendance` are not changed, so balances and history carry over untouched.
 
 **Optional precaution:** run `/export_leaderboard` before deploying and keep the `.xlsx` (restore with `/import_leaderboard`). That file covers balances only; for event history and the DKP log as well, take a database dump:
 `pg_dump "$DATABASE_URL" > frcoin-backup.sql`
 
 Best done **between events**. If a 1.x event is open during the upgrade, it becomes an open DKP event and gets a card on startup. It has no stored voice scope, so its snapshots use the officer's current voice channel, like 1.x.
 
-**Rollback:** point `main` back at the `v1` branch (`git reset --hard v1-final`, force-push `main`) and run the **Deploy (prod)** workflow again. A copy of 1.x is also kept on the `main` branch of the personal backup repo. 1.x ignores the new columns, so it runs fine against the migrated database. First close or cancel any open 2.0.0 events: 1.x can only track one open event, so it would only see the newest. If you later upgrade again, events that 1.x ended are recognised as closed, and they're never awarded twice.
+**Rollback:** point `main` back at the `v1` branch (`git reset --hard v1-final`, force-push `main`) and run the **Deploy (prod)** workflow again. A copy of 1.x is also kept on the `main` branch of the personal backup repo. 1.x ignores the new columns and tables, so it runs fine against the migrated database. First close or cancel any open 2.1.0 events: 1.x can only track one open event, so it would only see the newest. If you later upgrade again, events that 1.x ended are recognised as closed, and they're never awarded twice.
